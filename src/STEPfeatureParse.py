@@ -1,39 +1,69 @@
-
-# continuation of scratch_6, addressing complex edges with multiple maxima/minima
+# continuation of WIP_2jun24.py, addressing complex edges with multiple maxima/minima
 # introduction of dict structure, featureExtrema, to maintain local extrema (x, y) value, centroid disp value, u spline value, v spline surface optional value
 # remove pre-calculation of ParsedEdge['vertex1extremaMax'], ParsedEdge['vertex2extremaMax'] flags
 
+# Python STEP parser, NIST STEPcode using NIST BSD-3 license, STEPcode v0.8 -- github.com/stepcode/stepcode
+# https://github.com/stepcode/stepcode/blob/develop/src/exp2python/python/README.md
 from stepcode.Part21 import Parser
 import os, glob, re
-#from geomdl import BSpline
+
+# NURBS-Python (geomdl) is a self-contained, object-oriented pure Python B-Spline and NURBS library
+# geomdl v5.3.1
+# Please refer to the following DOI link to access the article:
+# https://doi.org/10.1016/j.softx.2018.12.005
+
+# @article{bingol2019geomdl,
+#   title={{NURBS-Python}: An open-source object-oriented {NURBS} modeling framework in {Python}},
+#   author={Bingol, Onur Rauf and Krishnamurthy, Adarsh},
+#   journal={{SoftwareX}},
+#   volume={9},
+#   pages={85--94},
+#   year={2019},
+#   publisher={Elsevier}
+# }
+
+# from geomdl import BSpline
 from geomdl import NURBS
 from geomdl import compatibility
 from geomdl import utilities
-from geomdl import evaluators
-
-#import copy
+#from geomdl import evaluators
+# import copy
 
 from collections import namedtuple  # PyCharm bug will flag this as type error
 Point = namedtuple("Point", "x y z")
 
-#from scipy import spatial # numpy version < 1.24
 import numpy as np
-
 
 # eps machine precision constant
 eps = np.finfo(float).eps
 
 eps_STEP_AP21 = 1e-6  # STEP precision seems to end here
 
-#eps_bspline = 1E-10 # precision used in bspline/NURB surface subroutines
-#machine_EPS = np.finfo(float).eps # float comparison
+# eps_bspline = 1E-10 # precision used in bspline/NURB surface subroutines
+# machine_EPS = np.finfo(float).eps # float comparison
 
 # need a precision factor that reflects increasing accuracy arising from iterative calculations of centroid --------------------------------------<<<<<<<<<<<<<<<<<
 # also scale factor affecting numerical precision
-# also STEP seems to be E-6 decimal places at best
-iterativeScaledPrecision = 1e-4  # for testing
+# STEP seems to be E-6 decimal places at best
+iterativeScaledPrecision = 1e-4  # for testing ------------------------------------------------
 
-#todo: dict data arrays like ParsedEdge should become classes, once all required fields & methods identified
+
+def FreeCADpointSyntax(A, color=(0., 0., 0.)):
+    '''print the instructions to create a FreeCAD model of a list of points'''
+    print('import FreeCAD as App')
+    print('import Draft')
+    for i, xyz in enumerate(A):
+        print('P{:} = Draft.make_point( {:1.8f}, {:1.8f}, {:1.8f}, color=({:1.8f}, {:1.8f}, {:1.8f}))'.format(i, xyz[0],
+                                                                                                              xyz[1],
+                                                                                                              xyz[2],
+                                                                                                              color[0],
+                                                                                                              color[1],
+                                                                                                              color[2]))
+    print('App.ActiveDocument.recompute()')
+    # print('setview()')
+
+
+# todo: dict data arrays like ParsedEdge should become classes, once all required fields & methods identified
 
 
 def angleAxis2RotMat(rotAxis, theta):
@@ -95,8 +125,8 @@ def rotationMatrix(axis, theta):
     # from numpy import asarray, array, dot
     # from math import sqrt, cos, sin
 
-    #axis = np.asarray(axis)
-    #theta = np.asarray(theta)
+    # axis = np.asarray(axis)
+    # theta = np.asarray(theta)
     SDAA = np.sqrt(np.dot(axis, axis))
     if SDAA == 0.0:
         raise RuntimeError("rotationMatrix() zero div error (0,0,0)?")
@@ -128,7 +158,7 @@ def arrayTypeCast(xyz):
 
 
 def cart2pol(x, y):
-    rho = np.sqrt(x**2 + y**2)
+    rho = np.sqrt(x ** 2 + y ** 2)
     phi = np.arctan2(y, x)
     return (rho, phi)
 
@@ -141,8 +171,34 @@ def pol2cart(rho, phi):
 
 def array3x1match(a, A):
     '''test whether a numpy array of 3 elements (a) exists within a list of 3 element arrays'''
-    T = [np.isclose(a[0], b[0], atol=eps) and np.isclose(a[1], b[1], atol=eps) and np.isclose(a[2], b[2], atol=eps) for b in A]
+    T = [np.isclose(a[0], b[0], atol=eps) and np.isclose(a[1], b[1], atol=eps) and np.isclose(a[2], b[2], atol=eps) for
+         b in A]
     return any(T)
+
+
+def medianOfFeaturePoints(Surfaces):
+    """get barycentre of all AFS feature points"""
+
+    outermostPoints = []
+
+    for AFS in Surfaces:
+        if AFS['ParsedSurface'].get('pointFeature') is not None:
+            if AFS['ParsedSurface']['pointFeature'].get('xyz') is not None:
+                [outermostPoints.append(mp) for mp in AFS['ParsedSurface']['pointFeature']['xyz']]
+        # if AFS['ParsedSurface'].get('axisPoint') is not None:
+        #     outermostPoints.append(AFS['ParsedSurface']['axisPoint'])
+        # print('AFS[ParsedSurface][axisPoint]')
+        # print(AFS['ParsedSurface']['axisPoint'])
+        for edge in AFS['outerBoundEdgeLoop']:
+            if edge.get('pointFeature') is not None:
+                if edge['pointFeature'].get('xyz') is not None:
+                    [outermostPoints.append(mp) for mp in edge['pointFeature']['xyz']]
+            # if edge.get('axisPoint') is not None:
+            #     outermostPoints.append(edge['axisPoint'])
+            # print('axisPoint')
+            # print(edge['axisPoint'])
+
+    return medianPoint(outermostPoints)
 
 
 # does one find a centroid through axis-intersection?
@@ -159,7 +215,9 @@ def medianPoint(pointArray):
     # from statistics import median # apparently slow/accurate
     # from numpy import median
     if len(pointArray) < 2:
-        raise RuntimeError("medianPoint() malformed input")
+        #raise RuntimeError("medianPoint() malformed input")
+        print("medianPoint() inadequate input")
+        return np.array([])
 
     xRange = [xyz[0] for xyz in pointArray]
     xCentroid = max(xRange) - ((max(xRange) - min(xRange)) / 2)
@@ -192,6 +250,7 @@ def pointDisp(p1, p2):
     else:
         raise RuntimeError("pointDisp error")
 
+
 # def checkFilePath(filePath):
 #     if os.path.isfile(filePath) and os.access(filePath, os.R_OK):
 #         return filePath
@@ -204,41 +263,46 @@ primitivesDir = os.path.normpath(
 primitivesDir = os.path.normpath(
     r"/home/foobert/STEP_test_files/primitives"
 )
+# testDir = os.path.normpath(
+#     r"/home/foobert/STEP_test_files"
+# )
 testDir = os.path.normpath(
-    r"/home/foobert/STEP_test_files"
+    r"/media/foobert/Dell2HDD/STEP_test_files"
 )
 
-#filepath = primitivesDir + "/Cube/unit_cube_inc8.0_blend.06.stp"
-#filepath = primitivesDir + "/Cylinder/unit_cyl.stp"
-#filepath = primitivesDir + "/Primitive_Cone-PartCone.step"
+# filepath = primitivesDir + "/Cube/unit_cube_inc8.0_blend.06.stp"
+# filepath = primitivesDir + "/Cylinder/unit_cyl.stp"
+# filepath = primitivesDir + "/Primitive_Cone-PartCone.step"
 
-#filepath = r"/home/foobert/Downloads/RR_STEP_test_1.step"
-#filepath = r"/home/foobert/Downloads/RR_STEP_test_N.step"
-#filepath = r"/home/foobert/Downloads/00000001_1ffb81a71e5b402e966b9341_step_000.step"
-#filepath = r"/home/foobert/Downloads/00000010_b4b99d35e04b4277931f9a9c_step_000.step"
-# filepath = r"/home/foobert/Downloads/LEA-M8F(AP203).STEP"
+#filepath = testDir + "/RR_STEP_test_1A.step" # pass.. I think, no representation available
+#filepath = testDir + "/RR_STEP_test_N.step" # fail, no trimmed_curve circle code================
+# filepath = testDir + "/00000001_1ffb81a71e5b402e966b9341_step_000.step"
+# filepath = testDir + "/00000010_b4b99d35e04b4277931f9a9c_step_000.step"
+# filepath = testDir + "/LEA-M8F(AP203).STEP"
 
-#filepath = testDir + "/simpleSpindle1.step"
-#filepath = testDir + "/Maltese_cruciform.step"
-#filepath = testDir + "/TiltedConeAP203.step"
-#filepath = testDir + "/OffsetCone_AP214_noPlacement_noParametric.step"
-#filepath = testDir + "/OffsetCone-PartCone.step"
-#filepath = testDir + "/TiltedCylinder4_AP214_PC.step"
-#filepath = testDir + "/Cylinder5_AP214_PC.step"
-#filepath = testDir + "/DrexelBlendedCylinder_topOvalPlane.step"
-#DrexelBlendedCylinder_curvedBlend.step
-#filepath = testDir + "/DrexelBlendedCylinder_midriffTube.step"
-#filepath = testDir + "/TiltedCylinder2.step"
-#filepath = primitivesDir + "/Cube/unit_cube.stp"
-filepath = testDir + "/Drexel_blended_cylinder.step"
-#filepath = testDir + "/DrexelBlendedCylinder_curvedBlend.step"
+filepath = testDir + "/9341_step_000.step" #FAIL - reverse list from spline=======================
+filepath = testDir + "/revolve_spline.step"
 
+# filepath = testDir + "/simpleSpindle1.step"
+# filepath = testDir + "/Maltese_cruciform.step"
+# filepath = testDir + "/TiltedConeAP203.step" # pass
+# filepath = testDir + "/OffsetCone_AP214_noPlacement_noParametric.step"
+# filepath = testDir + "/OffsetCone-PartCone.step"
+# filepath = testDir + "/TiltedCylinder4_AP214_PC.step"
+# filepath = testDir + "/Cylinder5_AP214_PC.step"
+# filepath = testDir + "/DrexelBlendedCylinder_topOvalPlane.step"
+# DrexelBlendedCylinder_curvedBlend.step
+# filepath = testDir + "/DrexelBlendedCylinder_midriffTube.step"
+# filepath = testDir + "/TiltedCylinder2.step"
+#filepath = testDir + "/TiltedCylinder3.step" #PASS
+# filepath = primitivesDir + "/Cube/unit_cube.stp"
+#filepath = testDir + "/Drexel_blended_ellipse_plain.step" # fail, no surfaces ellipse
+#filepath = testDir + "/Drexel_blended_cylinder.step" # pass
+# filepath = testDir + "/DrexelBlendedCylinder_curvedBlend.step" # pass
+#filepath = testDir + "/TiltedCylinder.step" # pass
+# filepath = testDir + "/Synth_ellipse_plain.step"
 
-# not all surface min/max found
-# edge min/max found - require local maxima for local centroid determination
-
-#filepath = testDir + "/TiltedCylinder.step"
-#filepath = testDir + "/Synth_ellipse_plain.step"
+print(filepath)
 
 try:
     # filepath sanity check
@@ -268,8 +332,10 @@ for cs in STEP_entities:
         if cs.type_name == "CLOSED_SHELL":
             ClosedShells.append(cs)
 
+
 def ref2index(s):
     return int(s[1:]) - 1
+
 
 # encountering step files with non-contiguous line and #ref indices
 if ref2index(STEP_entities[-1].ref) is not len(STEP_entities):
@@ -280,7 +346,7 @@ if ref2index(STEP_entities[-1].ref) is not len(STEP_entities):
     STEP_entities = padded_STEP_entities
 
 
-def radiusCentre3points_2(p1, p2, p3):
+def radiusCentre3points(p1, p2, p3):
     # radius + centre from 3 point circle
 
     t = p2 - p1
@@ -311,7 +377,7 @@ def rationalSurfaceExtremaParam_5(S, p,
                                   eps1=0.0001,
                                   eps2=0.0005,
                                   deltaFactor=4,
-                                  eps_bspline = 1E-10):
+                                  eps_bspline=1E-10):
     '''
     Use either Newton-Raphson, or a hillclimbing neighbour search to find minimal or maximal distance on a surface, S, from a supplied point, p
     - not tested with surfaces closed along U & V
@@ -373,17 +439,17 @@ def rationalSurfaceExtremaParam_5(S, p,
     def closedU():
         return np.isclose(np.array(S.ctrlpts2d[0]) - np.array(S.ctrlpts2d[-1]), eps_bspline).all()  # eps_STEP_AP21
 
-    #S.delta = delta  # set evaluation delta
+    # S.delta = delta  # set evaluation delta
     # tradeoff between sample density and feature identification
 
-    #deltaFactor = 5
-    #deltaFactor = 4
+    # deltaFactor = 5
+    # deltaFactor = 4
 
     # S.delta_u = 1 / (S.ctrlpts_size_u * deltaFactor)
     # S.delta_v = 1 / (S.ctrlpts_size_v * deltaFactor)
 
-    S.delta_u = 1 / len(S.knotvector_u) * deltaFactor
-    S.delta_v = 1 / len(S.knotvector_v) * deltaFactor
+    S.delta_u = 1 / (len(S.knotvector_u) * deltaFactor)
+    S.delta_v = 1 / (len(S.knotvector_v) * deltaFactor)
 
     # if S.evalpts == None:  # evaluate surface points---------appears redundant
     #     S.evaluate()
@@ -569,33 +635,33 @@ def rationalSurfaceExtremaParam_5(S, p,
 
         pArray = np.array(S.evaluate_list(uvArray))
 
-        #test1 = S.evaluate_single(uvArray[0]) #(0.0, 0.0))
-        #test2 = S.evaluate_single(uvArray[207]) #(0.0, 1.0))
-        #minSample=[]
+        # test1 = S.evaluate_single(uvArray[0]) #(0.0, 0.0))
+        # test2 = S.evaluate_single(uvArray[207]) #(0.0, 1.0))
+        # minSample=[]
 
         for CC, uv in neighbouringUV(len(uSamples), len(vSamples), closedU(), closedV()):
 
             pNW = pArray[CC[0]]
-            pN  = pArray[CC[1]]
+            pN = pArray[CC[1]]
             pNE = pArray[CC[2]]
-            pE  = pArray[CC[3]]
-            pC =  pArray[CC[4]]
-            pW  = pArray[CC[5]]
+            pE = pArray[CC[3]]
+            pC = pArray[CC[4]]
+            pW = pArray[CC[5]]
             pSW = pArray[CC[6]]
-            pS  = pArray[CC[7]]
+            pS = pArray[CC[7]]
             pSE = pArray[CC[8]]
 
             dpuv_NW = np.linalg.norm(p - pNW)
-            dpuv_N  = np.linalg.norm(p - pN)
+            dpuv_N = np.linalg.norm(p - pN)
             dpuv_NE = np.linalg.norm(p - pNE)
-            dpuv_E  = np.linalg.norm(p - pE)
-            dpuv    = np.linalg.norm(p - pC)
-            dpuv_W  = np.linalg.norm(p - pW)
+            dpuv_E = np.linalg.norm(p - pE)
+            dpuv = np.linalg.norm(p - pC)
+            dpuv_W = np.linalg.norm(p - pW)
             dpuv_SW = np.linalg.norm(p - pSW)
-            dpuv_S  = np.linalg.norm(p - pS)
+            dpuv_S = np.linalg.norm(p - pS)
             dpuv_SE = np.linalg.norm(p - pSE)
 
-            #testSample = [pNW, pN, pNE, pW, pC, pE, pSW, pS, pSE]
+            # testSample = [pNW, pN, pNE, pW, pC, pE, pSW, pS, pSE]
             # if ((dpuv_S <= dpuv_NW) and (dpuv_S <= dpuv_N) and (dpuv_S <= dpuv_NE) and
             #         (dpuv_S <= dpuv_W) and (dpuv_S <= dpuv_E) and
             #         (dpuv_S <= dpuv_SW) and (dpuv_S <= dpuv) and (dpuv_S <= dpuv_SE)):
@@ -605,19 +671,18 @@ def rationalSurfaceExtremaParam_5(S, p,
                 if ((dpuv >= dpuv_NW) and (dpuv >= dpuv_N) and (dpuv >= dpuv_NE) and
                         (dpuv >= dpuv_W) and (dpuv >= dpuv_E) and
                         (dpuv >= dpuv_SW) and (dpuv >= dpuv_S) and (dpuv >= dpuv_SE)):
-
-                    #b_NW = np.linalg.norm(pC - pNW)
+                    # b_NW = np.linalg.norm(pC - pNW)
                     b_N = np.linalg.norm(pC - pN)
-                    #b_NE = np.linalg.norm(pC - pNE)
+                    # b_NE = np.linalg.norm(pC - pNE)
                     b_E = np.linalg.norm(pC - pE)
 
                     b_W = np.linalg.norm(pC - pW)
-                    #b_SW = np.linalg.norm(pC - pSW)
+                    # b_SW = np.linalg.norm(pC - pSW)
                     b_S = np.linalg.norm(pC - pS)
-                    #b_SE = np.linalg.norm(pC - pSE)
+                    # b_SE = np.linalg.norm(pC - pSE)
 
                     maxBound.append(max([b_N, b_E, b_W, b_S]))
-                    extremaUV.append(uvArray[CC[4]]) # uv[0]*S.sample_size_v + uv[1]
+                    extremaUV.append(uvArray[CC[4]])  # uv[0]*S.sample_size_v + uv[1]
                     extremaP.append(pArray[CC[4]])
 
             else:  # minS
@@ -626,16 +691,15 @@ def rationalSurfaceExtremaParam_5(S, p,
                         (dpuv <= dpuv_SW) and (dpuv <= dpuv_S) and (dpuv <= dpuv_SE)):
                     # where a point is orthogonal to a planar surface -> sphere radius test, or accept minima
 
-
-                    #b_NW = np.linalg.norm(pC - pNW)
+                    # b_NW = np.linalg.norm(pC - pNW)
                     b_N = np.linalg.norm(pC - pN)
-                    #b_NE = np.linalg.norm(pC - pNE)
+                    # b_NE = np.linalg.norm(pC - pNE)
                     b_E = np.linalg.norm(pC - pE)
 
                     b_W = np.linalg.norm(pC - pW)
-                    #b_SW = np.linalg.norm(pC - pSW)
+                    # b_SW = np.linalg.norm(pC - pSW)
                     b_S = np.linalg.norm(pC - pS)
-                    #b_SE = np.linalg.norm(pC - pSE)
+                    # b_SE = np.linalg.norm(pC - pSE)
 
                     maxBound.append(max([b_N, b_E, b_W, b_S]))
                     extremaUV.append(uvArray[CC[4]])
@@ -666,8 +730,8 @@ def rationalSurfaceExtremaParam_5(S, p,
         for CC, uv in neighbouringUV(len(uSamples), len(vSamples), closedU(), closedV()):
 
             puv = np.array(pArray[CC[4]])
-            pur, pucc = radiusCentre3points_2(pArray[CC[3]], puv, pArray[CC[5]])
-            pvr, pvcc = radiusCentre3points_2(pArray[CC[7]], puv, pArray[CC[1]])
+            pur, pucc = radiusCentre3points(pArray[CC[3]], puv, pArray[CC[5]])
+            pvr, pvcc = radiusCentre3points(pArray[CC[7]], puv, pArray[CC[1]])
 
             # find media point of U curvature centre and V curvature, kuv
             if pur is np.inf and pvr is not np.inf:
@@ -711,7 +775,8 @@ def rationalSurfaceExtremaParam_5(S, p,
 
             if not any(discreteK[ssn] == np.inf for ssn in surroundNodes):
                 if maxSearch:
-                    if (all((np.abs(discreteK[ssn]) >= discreteK[(S.sample_size_u * uv[0]) + uv[1]]) for ssn in surroundNodes) and
+                    if (all((np.abs(discreteK[ssn]) >= discreteK[(S.sample_size_u * uv[0]) + uv[1]]) for ssn in
+                            surroundNodes) and
                             (discreteK[(S.sample_size_u * uv[0]) + uv[1]] > 0)):
                         # this version excludes negative curves from surrounding curvature values
                         # if all(np.abs(discreteK[ssn]) > discreteK[S.sample_size_u * u + v] or
@@ -720,15 +785,16 @@ def rationalSurfaceExtremaParam_5(S, p,
 
                         pC = np.array(S.evaluate_single(uv))
                         localExtremaP(pC)
-                        maxBound.append(max([np.linalg.norm(pC - np.array(S.evaluate_single(uvk))) for uvk in surroundNodes]))
+                        maxBound.append(
+                            max([np.linalg.norm(pC - np.array(S.evaluate_single(uvk))) for uvk in surroundNodes]))
                         leu.append(uv)
                 else:
                     if all((np.abs(discreteK[ssn]) >= discreteK[(S.sample_size_u * uv[0]) + uv[1]]) for ssn in
                            surroundNodes) and (discreteK[(S.sample_size_u * uv[0]) + uv[1]] < 0):
-
                         pC = np.array(S.evaluate_single(uv))
                         localExtremaP(pC)
-                        maxBound.append(max([np.linalg.norm(pC - np.array(S.evaluate_single(uvk))) for uvk in surroundNodes]))
+                        maxBound.append(
+                            max([np.linalg.norm(pC - np.array(S.evaluate_single(uvk))) for uvk in surroundNodes]))
                         leu.append(uv)
 
         return leu
@@ -739,7 +805,7 @@ def rationalSurfaceExtremaParam_5(S, p,
         divU = S.delta_u
         divV = S.delta_v
         dpuvlocal = np.linalg.norm(p - np.array(S.evaluate_single((mpU, mpV,))))
-        #dpuvlocal = np.inner(p - np.array(S.evaluate_single((mpU, mpV,))))
+        # dpuvlocal = np.inner(p - np.array(S.evaluate_single((mpU, mpV,))))
 
         while not tolFlag:
             divU /= 2
@@ -782,7 +848,7 @@ def rationalSurfaceExtremaParam_5(S, p,
                       dpuv_N,
                       dpuv_NE,
                       dpuv_W,
-                      #dpuvlocal,
+                      # dpuvlocal,
                       dpuv_E,
                       dpuv_SW,
                       dpuv_S,
@@ -790,7 +856,7 @@ def rationalSurfaceExtremaParam_5(S, p,
 
             if maxSearch:
                 if np.abs(max(dispUV) - dpuvlocal) >= tol:
-                    #np.abs(max(dispUV) - dpuvlocal) >= tol:
+                    # np.abs(max(dispUV) - dpuvlocal) >= tol:
                     maxUVindex = dispUV.index(max(dispUV))
                     mpU = subDivs[maxUVindex][0]
                     mpV = subDivs[maxUVindex][1]
@@ -851,14 +917,14 @@ def rationalSurfaceExtremaParam_5(S, p,
         # e = None
         while i < maxits:
             if (cuv[0] < 0) or (cuv[0] > 1) or (cuv[1] < 0) or (cuv[1] > 1):
-                return (np.inf, np.inf) # derivatives sometimes > |2|
+                return (np.inf, np.inf)  # derivatives sometimes > |2|
 
-            #test = S.derivatives(1.0, 0.0, 0)
+            # test = S.derivatives(1.0, 0.0, 0)
 
             e = np.array(S.derivatives(cuv[0], cuv[1], 2))
-            dif = e[0][0] - p # e[0][0] is surface point evaluated at cuv(u,v)
+            dif = e[0][0] - p  # e[0][0] is surface point evaluated at cuv(u,v)
             c1v = np.linalg.norm(dif)
-            c1 = c1v < eps1 #  |S(u,v) - p| < e1 (point coincidence)
+            c1 = c1v < eps1  # |S(u,v) - p| < e1 (point coincidence)
 
             #  |Su(u,v)*(S(u,v) - P)|
             #  ----------------------  < e2 (cosine minima)
@@ -886,25 +952,33 @@ def rationalSurfaceExtremaParam_5(S, p,
             ct = n(cuv, e, dif)
 
             #  correct for exceeding bounds
-            if ct[0] < S.knotvector_u[0]: # [ maxu - ( ct[0] - minu ), ct[1] ]
-                if closedU(): ct = [S.knotvector_u[-1] - (S.knotvector_u[0] - ct[0]), ct[1]]
-                #if closedU(): ct = [S.knotvector_u[0] + ct[0] % (S.knotvector_u[-1] - S.knotvector_u[0]), ct[1]]
-                else: ct = [S.knotvector_u[0] + eps_bspline, ct[1]]
+            if ct[0] < S.knotvector_u[0]:  # [ maxu - ( ct[0] - minu ), ct[1] ]
+                if closedU():
+                    ct = [S.knotvector_u[-1] - (S.knotvector_u[0] - ct[0]), ct[1]]
+                # if closedU(): ct = [S.knotvector_u[0] + ct[0] % (S.knotvector_u[-1] - S.knotvector_u[0]), ct[1]]
+                else:
+                    ct = [S.knotvector_u[0] + eps_bspline, ct[1]]
 
             elif ct[0] > S.knotvector_u[-1]:
-                if closedU(): ct = [S.knotvector_u[0] + (ct[0] - S.knotvector_u[-1]), ct[1]]
-                #if closedU(): ct = [S.knotvector_u[-1] - ct[0] % (S.knotvector_u[-1] - S.knotvector_u[0]), ct[1]]
-                else: ct = [S.knotvector_u[-1] - eps_bspline, ct[1]]
+                if closedU():
+                    ct = [S.knotvector_u[0] + (ct[0] - S.knotvector_u[-1]), ct[1]]
+                # if closedU(): ct = [S.knotvector_u[-1] - ct[0] % (S.knotvector_u[-1] - S.knotvector_u[0]), ct[1]]
+                else:
+                    ct = [S.knotvector_u[-1] - eps_bspline, ct[1]]
 
             if ct[1] < S.knotvector_v[0]:
-                if closedV(): ct = [ct[0], S.knotvector_v[-1] - (S.knotvector_v[0] - ct[1])]
-                #if closedV(): ct = [ct[0], S.knotvector_v[0] + ct[1] % (S.knotvector_v[-1] - S.knotvector_v[0])]
-                else: ct = [ct[0], S.knotvector_v[0] + eps_bspline]
+                if closedV():
+                    ct = [ct[0], S.knotvector_v[-1] - (S.knotvector_v[0] - ct[1])]
+                # if closedV(): ct = [ct[0], S.knotvector_v[0] + ct[1] % (S.knotvector_v[-1] - S.knotvector_v[0])]
+                else:
+                    ct = [ct[0], S.knotvector_v[0] + eps_bspline]
 
             elif ct[1] > S.knotvector_v[-1]:
-                #if closedV(): ct = [ct[0], S.knotvector_v[0] + (ct[1] - S.knotvector_v[-1])]
-                if closedV(): ct = [ct[0], S.knotvector_v[-1] - ct[1] % (S.knotvector_v[-1] - S.knotvector_v[0])]
-                else: ct = [ct[0], S.knotvector_v[-1] - eps_bspline]
+                # if closedV(): ct = [ct[0], S.knotvector_v[0] + (ct[1] - S.knotvector_v[-1])]
+                if closedV():
+                    ct = [ct[0], S.knotvector_v[-1] - ct[1] % (S.knotvector_v[-1] - S.knotvector_v[0])]
+                else:
+                    ct = [ct[0], S.knotvector_v[-1] - eps_bspline]
 
             c3v0 = np.linalg.norm((ct[0] - cuv[0]) * e[1][0])
             c3v1 = np.linalg.norm((ct[1] - cuv[1]) * e[0][1])
@@ -950,1440 +1024,32 @@ def rationalSurfaceExtremaParam_5(S, p,
         if not any([np.isclose(m, u, eps1).all() for u in extremaUnique]):
             extremaUnique.append(m)
 
-    if (localExtrema and (len(extremaUnique) == 1)) or not localExtrema:  # if there is only one extrema, localextrema is moot
-        if uv_xyz: return extremaUnique # return single value in list for compatibility
-        else: return [np.array(S.evaluate_single(extremaUnique[0])),]
+    if (localExtrema and (
+            len(extremaUnique) == 1)) or not localExtrema:  # if there is only one extrema, localextrema is moot
+        if uv_xyz:
+            return extremaUnique  # return single value in list for compatibility
+        else:
+            return [np.array(S.evaluate_single(extremaUnique[0])), ]
     else:
         if localExtrema:
-            if uv_xyz: return extremaUnique
-            else: return S.evaluate_list(extremaUnique)
-        else: # return single maxima
+            if uv_xyz:
+                return extremaUnique
+            else:
+                return S.evaluate_list(extremaUnique)
+        else:  # return single maxima
             extremaUniquePoint = S.evaluate_list(extremaUnique)
             dispsExtrema = [np.linalg.norm(np.array(e) - p) for e in extremaUniquePoint]
-            if maxSearch: # return single value in list for compatibility
-                if uv_xyz: return [extremaUnique[dispsExtrema.index(max(dispsExtrema))],]
-                else: return [np.array(extremaUniquePoint[dispsExtrema.index(max(dispsExtrema))]),]
-            else: # minsearch
-                if uv_xyz: return [extremaUnique[dispsExtrema.index(min(dispsExtrema))],]
-                else: return [np.array(extremaUniquePoint[dispsExtrema.index(min(dispsExtrema))]),]
+            if maxSearch:  # return single value in list for compatibility
+                if uv_xyz:
+                    return [extremaUnique[dispsExtrema.index(max(dispsExtrema))], ]
+                else:
+                    return [np.array(extremaUniquePoint[dispsExtrema.index(max(dispsExtrema))]), ]
+            else:  # minsearch
+                if uv_xyz:
+                    return [extremaUnique[dispsExtrema.index(min(dispsExtrema))], ]
+                else:
+                    return [np.array(extremaUniquePoint[dispsExtrema.index(min(dispsExtrema))]), ]
 
-
-
-# def rationalSurfaceExtremaParam_5(S, p,
-#                                   maxSearch=True,
-#                                   localExtrema=False,
-#                                   curvatureTest=False,
-#                                   uv_xyz=True,
-#                                   eps1=0.0001,
-#                                   eps2=0.0005,
-#                                   deltaFactor=4,
-#                                   eps_bspline = 1E-10):
-#     '''
-#     Use either Newton-Raphson, or a hillclimbing neighbour search to find minimal or maximal distance on a surface, S, from a supplied point, p
-#     - not tested with surfaces closed along U & V
-#     maxSearch: search for most distant point from p if true, else nearest if false
-#     localExtrema: find any local extrema which differs from surrounding sample points, tolerance not sufficiently defined
-#     curvatureTest: rather than displacement of sampled points to provide seed locations for N-R/hillclimb search,
-#     use a combination of the centres of curvature at any point across U-axis and V-axis to identify C2 inflection point.
-#     uv_xyz: return u,v normalised values or cartesian x,y,z values
-#     eps1: point coincidence limit, halt N-R on reaching this minima
-#     eps2: cosine angle limit, halt N-R on reaching this minima
-#     delta: sample interval dividing surface into points
-#     '''
-#
-#     # easy to find a minimum, but a maximum found through the original hillclimbing algorithm will settle on local maxima
-#     # for surfaces, minimize the following:
-#     #
-#     # f = Su(u,v) * r = 0
-#     # g = Sv(u,v) * r = 0
-#     #
-#     #   where r = S(u,v) - P
-#     #
-#     # Requires Newton-Raphson iteration, objective function is vector valued
-#     #
-#     #     J d = k
-#     #
-#     #     d =   [ u* - u, v* - v ] (alternatively u[i+1] -  u[i], v[i+1]- v[i])
-#     #     k = - [ f(u,v), g(u,v) ]
-#     #     J =     |Su|^2   +  Suu * r       Su*Sv  +  Suv * r
-#     #              Su*Sv   +  Svu * r      |Sv|^2  +  Svv * r
-#     #
-#     # halting conditions:
-#     # point coincidence
-#     #
-#     #         |S(u,v) - p| < e1
-#     #
-#     # cosine
-#     #
-#     #    |Su(u,v)*(S(u,v) - P)|
-#     #    ----------------------  < e2
-#     #    |Su(u,v)| |S(u,v) - P|
-#     #
-#     #    |Sv(u,v)*(S(u,v) - P)|
-#     #    ----------------------  < e2
-#     #    |Sv(u,v)| |S(u,v) - P|
-#     #
-#     # 1) first check 2 & 3
-#     # 2) if at least one of these is not, compute new value, otherwise halt
-#     # 3) ensure the parameter stays within range
-#     #     * if not closed, don't allow outside of range a-b
-#     #     * if closed (e.g. circle), allow to move back to beginning
-#     # 4)  if |(u* - u)C'(u)| < e1, halt
-#
-#     # todo: take value from STEP fields
-#     # check if surface closed along U and V
-#
-#     def closedV():
-#         return np.isclose([np.array(s[0]) - np.array(s[-1]) for s in S.ctrlpts2d], eps_bspline).all()
-#
-#     def closedU():
-#         return np.isclose(np.array(S.ctrlpts2d[0]) - np.array(S.ctrlpts2d[-1]), eps_bspline).all()  # eps_STEP_AP21
-#
-#     #S.delta = delta  # set evaluation delta
-#     # tradeoff between sample density and feature identification
-#
-#     #deltaFactor = 5
-#     deltaFactor = 4
-#
-#     # S.delta_u = 1 / (S.ctrlpts_size_u * deltaFactor)
-#     # S.delta_v = 1 / (S.ctrlpts_size_v * deltaFactor)
-#
-#     S.delta_u = 1 / len(S.knotvector_u) * deltaFactor
-#     S.delta_v = 1 / len(S.knotvector_v) * deltaFactor
-#
-#     # if S.evalpts == None:  # evaluate surface points---------appears redundant
-#     #     S.evaluate()
-#
-#     def neighbouringUV(U, V, isClosedU, isClosedV):
-#
-#         for u in range(0, U - 2 + (2 * isClosedV)):
-#             for v in range(0, V - 2 + (2 * isClosedU)):
-#
-#                 if v == 0:
-#                     NW = (((u + 2) % U) * V)
-#                     N = (((u + 2) % U) * V) + 1
-#                     NE = (((u + 2) % U) * V) + 2
-#
-#                     W = (((u + 1) % U) * V)
-#                     C = (((u + 1) % U) * V) + 1
-#                     E = (((u + 1) % U) * V) + 2
-#
-#                     SW = ((u % U) * V)
-#                     S = ((u % U) * V) + 1
-#                     SE = ((u % U) * V) + 2
-#
-#                 if v >= 1:
-#                     NW = N
-#                     W = C  # central instance
-#                     SW = S
-#
-#                     N = NE
-#                     C = E
-#                     S = SE
-#
-#                     NE = (((u + 2) % U) * V) + ((v + 2) % V)
-#                     E = (((u + 1) % U) * V) + ((v + 2) % V)
-#                     SE = ((u % U) * V) + ((v + 2) % V)
-#
-#                 # print([NW, N, NE])
-#                 # print([W, C, E])
-#                 # print([SW, S, SE])
-#                 # print("==========")
-#                 # print([u, v, ((u * V) + v) ])
-#                 # print("==========")
-#
-#                 yield ([NW, N, NE, W, C, E, SW, S, SE], (u, v))
-#
-#     # def _neighbouringUV(U, V, isClosedU, isClosedV):
-#     #     # generator function to yield neighbouring indices over a matrix of size U x V
-#     #
-#     #     openU = not isClosedU
-#     #     openV = not isClosedV
-#     #
-#     #     for u in range(openU, U - openU):
-#     #         for v in range(openV, V - openV):
-#     #
-#     #             if v == 0:  # closed in v direction
-#     #                 if u == U - 1:
-#     #                     NW = V - 1
-#     #                 else:
-#     #                     NW = ((u + 2) * V) + v - 1
-#     #
-#     #                 W = (V * (u + 1)) - 1
-#     #
-#     #                 if u == 0:
-#     #                     SW = (U * V) - 1  # V - 1
-#     #                 else:
-#     #                     SW = (u * V) - 1
-#     #
-#     #                 if u == U - 1:  # closed in u direction
-#     #                     N = v
-#     #                 else:
-#     #                     N = V * (u + 1)
-#     #
-#     #                 C = u * V
-#     #
-#     #                 if u == 0:
-#     #                     S = V * (U - 1)
-#     #                 else:
-#     #                     S = V * (u - 1)
-#     #
-#     #             if v == 1:
-#     #                 if u == U - 1:  # closed in u direction
-#     #                     NW = v - 1
-#     #                 else:
-#     #                     NW = ((u + 1) * V) + v - 1
-#     #
-#     #                 W = (u * V) + v - 1
-#     #
-#     #                 if u == 0:
-#     #                     SW = ((U - 1) * V) + v - 1
-#     #                 else:
-#     #                     SW = ((u - 1) * V) + v - 1
-#     #
-#     #                 if u == U - 1:  # closed in v direction
-#     #                     N = v
-#     #                 else:
-#     #                     N = ((u + 1) * V) + v
-#     #
-#     #                 C = (u * V) + v
-#     #
-#     #                 if u == 0:
-#     #                     S = ((U - 1) * V) + 1
-#     #                 else:
-#     #                     S = ((u - 1) * V) + v
-#     #
-#     #             if v > 1:
-#     #                 NW = N
-#     #                 W = C  # central instance
-#     #                 SW = S
-#     #
-#     #                 N = NE
-#     #                 C = E
-#     #                 S = SE
-#     #
-#     #             if v == V - 1:  # closed in v direction
-#     #                 if u < U - 1:
-#     #                     NE = (u + 1) * V
-#     #                 elif u == U - 1:  # closed in u direction
-#     #                     NE = 0
-#     #
-#     #                 if u < U - 1:
-#     #                     E = u * V
-#     #                 elif u == U - 1:
-#     #                     E = ((u - 1) * V) + v + 1
-#     #
-#     #                 if u == 0:
-#     #                     SE = ((U - 1) * V)
-#     #                 elif u < U - 1:
-#     #                     SE = (u - 1) * V
-#     #                 elif u == U - 1:
-#     #                     SE = ((u - 2) * V) + v + 1
-#     #
-#     #             elif v < V - 1:
-#     #                 if u < U - 1:  # only have to calculate this once per loop
-#     #                     NE = ((u + 1) * V) + v + 1
-#     #                 elif u == U - 1:  # closed in u direction
-#     #                     NE = v + 1
-#     #
-#     #                 if u < U - 1:  # only have to calculate this once per loop
-#     #                     E = (u * V) + v + 1
-#     #                 elif u == U - 1:
-#     #                     E = (u * V) + v + 1
-#     #
-#     #                 if u == 0:
-#     #                     SE = ((U - 1) * V) + v + 1
-#     #                 elif u < U - 1:  # only have to calculate this once per loop
-#     #                     SE = ((u - 1) * V) + v + 1
-#     #                 elif u == U - 1:
-#     #                     SE = ((u - 1) * V) + v + 1
-#     #
-#     #             # print([NW, N, NE])
-#     #             # print([W, C, E])
-#     #             # print([SW, S, SE])
-#     #             # print("==========")
-#     #
-#     #             yield ([NW, N, NE, W, C, E, SW, S, SE], (u, v))
-#
-#     def localNeighbourSearch(S):
-#         extremaUV = []
-#         extremaP = []
-#         maxBound = []
-#
-#         # not S.evalpts
-#         uSamples = np.linspace(S.knotvector_u[0], S.knotvector_u[-1], num=len(S.knotvector_u) * deltaFactor, endpoint=(closedU()))
-#         vSamples = np.linspace(S.knotvector_v[0], S.knotvector_v[-1], num=len(S.knotvector_v) * deltaFactor, endpoint=(closedV()))
-#         uvArray = np.zeros((len(uSamples) * len(vSamples), 2))
-#
-#         for vi, vS in enumerate(vSamples):
-#             for ui, uS in enumerate(uSamples):
-#                 uvArray[(ui * len(vSamples)) + vi] = [uS, vS]
-#
-#         pArray = np.array(S.evaluate_list(uvArray))
-#
-#         for CC, uv in neighbouringUV(len(uSamples), len(vSamples), closedU(), closedV()):
-#
-#             pNW = pArray[CC[0]]
-#             pN  = pArray[CC[1]]
-#             pNE = pArray[CC[2]]
-#             pE  = pArray[CC[3]]
-#             pC =  pArray[CC[4]]
-#             pW  = pArray[CC[5]]
-#             pSW = pArray[CC[6]]
-#             pS  = pArray[CC[7]]
-#             pSE = pArray[CC[8]]
-#
-#             dpuv_NW = np.linalg.norm(p - pNW)
-#             dpuv_N  = np.linalg.norm(p - pN)
-#             dpuv_NE = np.linalg.norm(p - pNE)
-#             dpuv_E  = np.linalg.norm(p - pE)
-#             dpuv    = np.linalg.norm(p - pC)
-#             dpuv_W  = np.linalg.norm(p - pW)
-#             dpuv_SW = np.linalg.norm(p - pSW)
-#             dpuv_S  = np.linalg.norm(p - pS)
-#             dpuv_SE = np.linalg.norm(p - pSE)
-#
-#             testSample = [pNW, pN, pNE, pW, pC, pE, pSW, pS, pSE]
-#
-#             if maxSearch:
-#                 if ((dpuv >= dpuv_NW) and (dpuv >= dpuv_N) and (dpuv >= dpuv_NE) and
-#                         (dpuv >= dpuv_W) and (dpuv >= dpuv_E) and
-#                         (dpuv >= dpuv_SW) and (dpuv >= dpuv_S) and (dpuv >= dpuv_SE)):
-#
-#                     #b_NW = np.linalg.norm(pC - pNW)
-#                     b_N = np.linalg.norm(pC - pN)
-#                     #b_NE = np.linalg.norm(pC - pNE)
-#                     b_E = np.linalg.norm(pC - pE)
-#
-#                     b_W = np.linalg.norm(pC - pW)
-#                     #b_SW = np.linalg.norm(pC - pSW)
-#                     b_S = np.linalg.norm(pC - pS)
-#                     #b_SE = np.linalg.norm(pC - pSE)
-#
-#                     maxBound.append(max([b_N, b_E, b_W, b_S]))
-#                     extremaUV.append(uvArray[CC[4]]) # uv[0]*S.sample_size_v + uv[1]
-#                     extremaP.append(pArray[CC[4]])
-#
-#             else:  # minS
-#                 if ((dpuv <= dpuv_NW) and (dpuv <= dpuv_N) and (dpuv <= dpuv_NE) and
-#                         (dpuv <= dpuv_W) and (dpuv <= dpuv_E) and
-#                         (dpuv <= dpuv_SW) and (dpuv <= dpuv_S) and (dpuv <= dpuv_SE)):
-#                     # where a point is orthogonal to a planar surface -> sphere radius test, or accept minima
-#
-#
-#                     #b_NW = np.linalg.norm(pC - pNW)
-#                     b_N = np.linalg.norm(pC - pN)
-#                     #b_NE = np.linalg.norm(pC - pNE)
-#                     b_E = np.linalg.norm(pC - pE)
-#
-#                     b_W = np.linalg.norm(pC - pW)
-#                     #b_SW = np.linalg.norm(pC - pSW)
-#                     b_S = np.linalg.norm(pC - pS)
-#                     #b_SE = np.linalg.norm(pC - pSE)
-#
-#                     maxBound.append(max([b_N, b_E, b_W, b_S]))
-#                     extremaUV.append(uvArray[CC[4]])
-#                     extremaP.append(pArray[CC[4]])
-#
-#         return extremaUV, extremaP, maxBound
-#
-#     def curvatureSearch():
-#
-#         # not S.evalpts
-#         uSamples = np.linspace(S.knotvector_u[0], S.knotvector_u[-1], num=len(S.knotvector_u) * deltaFactor,
-#                                endpoint=(closedU()))
-#         vSamples = np.linspace(S.knotvector_v[0], S.knotvector_v[-1], num=len(S.knotvector_v) * deltaFactor,
-#                                endpoint=(closedV()))
-#         uvArray = np.zeros((len(uSamples) * len(vSamples), 2))
-#
-#         for vi, vS in enumerate(vSamples):
-#             for ui, uS in enumerate(uSamples):
-#                 uvArray[(ui * len(vSamples)) + vi] = [uS, vS]
-#
-#         pArray = np.array(S.evaluate_list(uvArray))
-#
-#         discreteK = [np.inf] * len(uvArray)
-#         for CC, uv in neighbouringUV(len(uSamples), len(vSamples), closedU(), closedV()):
-#
-#             puv = np.array(pArray[CC[4]])
-#             pur, pucc = radiusCentre3points_2(pArray[CC[3]], puv, pArray[CC[5]])
-#             pvr, pvcc = radiusCentre3points_2(pArray[CC[7]], puv, pArray[CC[1]])
-#
-#             # S.evalpts[(S.sample_size_u * u) + v]
-#
-#             # find media point of U curvature centre and V curvature, kuv
-#             if pur is np.inf and pvr is not np.inf:
-#                 kuv = pvcc - puv
-#             elif pur is not np.inf and pvr is np.inf:
-#                 kuv = pucc - puv
-#             elif pur is np.inf and pvr is np.inf:
-#                 discreteK[(S.sample_size_u * uv[0]) + uv[1]] = np.inf
-#                 break
-#             else:
-#                 kuv = ((pucc - puv) + (pvcc - puv)) / 2
-#
-#             dkuv = np.linalg.norm(kuv - puv)
-#
-#             if np.linalg.norm(p - puv) > np.linalg.norm(kuv - p):
-#                 # p is on the same side of the surface as the median curvature
-#                 discreteK[(S.sample_size_u * uv[0]) + uv[1]] = dkuv
-#
-#             if np.linalg.norm(p - puv) < np.linalg.norm(kuv - p):
-#                 # smallest radius, with curvature centre on far side of surface from p
-#                 discreteK[(S.sample_size_u * uv[0]) + uv[1]] = -dkuv
-#
-#             # todo: examine issue with non-colinear curve centre and projecting point
-#             # e.g. proj(p)
-#             #                 if np.dot(p - p1, pucc - p1)/np.linalg.norm(pucc - p1) > 0:
-#             #                     discreteK[i] = pur
-#             #                 else:
-#             #                     discreteK[i] = -pur
-#
-#         return discreteK
-#
-#     def localCurvatureExtrema(discreteK):
-#         leu = []
-#
-#         for CC, uv in neighbouringUV(S.sample_size_u, S.sample_size_v, closedU(), closedV()):
-#             surroundNodes = [CC[1], CC[3], CC[5], CC[7]]
-#
-#             if not any(discreteK[ssn] == np.inf for ssn in surroundNodes):
-#                 if maxSearch:
-#                     if (all((np.abs(discreteK[ssn]) >= discreteK[(S.sample_size_u * uv[0]) + uv[1]]) for ssn in surroundNodes) and
-#                             (discreteK[(S.sample_size_u * uv[0]) + uv[1]] > 0)):
-#                         # this version excludes negative curves from surrounding curvature values
-#                         # if all(np.abs(discreteK[ssn]) > discreteK[S.sample_size_u * u + v] or
-#                         # (discreteK[ssn]<0) for ssn in surroundNodes) and
-#                         # (discreteK[S.sample_size_u * u + v] > 0):
-#                         leu.append(uv)
-#                 else:
-#                     if all((np.abs(discreteK[ssn]) >= discreteK[(S.sample_size_u * uv[0]) + uv[1]]) for ssn in
-#                            surroundNodes) and (discreteK[(S.sample_size_u * uv[0]) + uv[1]] < 0):
-#                         leu.append(uv)
-#
-#         # , localExtremaP, maxBound
-#         return leu
-#
-#     def subSearchUV(mpU, mpV, tol):
-#         # create simple subdivisions around a minimum point as simple hillclimb search
-#         tolFlag = 0
-#         divU = S.delta_u
-#         divV = S.delta_v
-#         dpuvlocal = np.linalg.norm(p - np.array(S.evaluate_single((mpU, mpV,))))
-#         #dpuvlocal = np.inner(p - np.array(S.evaluate_single((mpU, mpV,))))
-#
-#         while not tolFlag:
-#             divU /= 2
-#             divV /= 2
-#
-#             subDivs = [[mpU - divU, mpV + divV],
-#                        [mpU, mpV + divV],
-#                        [mpU + divU, mpV + divV],
-#                        [mpU - divU, mpV],
-#                        [mpU, mpV],
-#                        [mpU + divU, mpV],
-#                        [mpU - divU, mpV - divV],
-#                        [mpU, mpV - divV],
-#                        [mpU + divU, mpV - divV]]
-#
-#             for sdv in subDivs:
-#                 if sdv[0] > 1.0: sdv[0] = 1.0
-#                 if sdv[0] < 0.0: sdv[0] = 0.0
-#                 if sdv[1] > 1.0: sdv[1] = 1.0
-#                 if sdv[1] < 0.0: sdv[1] = 0.0
-#
-#             pSubDivs = S.evaluate_list(subDivs)
-#
-#             # test np.inner
-#             # dispUV = [np.inner(p - psd) for psd in pSubDivs]
-#
-#             dpuv_NW = np.linalg.norm(p - pSubDivs[0])
-#             dpuv_N = np.linalg.norm(p - pSubDivs[1])
-#             dpuv_NE = np.linalg.norm(p - pSubDivs[2])
-#
-#             dpuv_W = np.linalg.norm(p - pSubDivs[3])
-#             # dpuv = np.linalg.norm(p - pSubDivs[4])
-#             dpuv_E = np.linalg.norm(p - pSubDivs[5])
-#
-#             dpuv_SW = np.linalg.norm(p - pSubDivs[6])
-#             dpuv_S = np.linalg.norm(p - pSubDivs[7])
-#             dpuv_SE = np.linalg.norm(p - pSubDivs[8])
-#
-#             dispUV = [dpuv_NW,
-#                       dpuv_N,
-#                       dpuv_NE,
-#                       dpuv_W,
-#                       #dpuvlocal,
-#                       dpuv_E,
-#                       dpuv_SW,
-#                       dpuv_S,
-#                       dpuv_SE]
-#
-#             if maxSearch:
-#                 if np.abs(max(dispUV) - dpuvlocal) >= tol:
-#                     #np.abs(max(dispUV) - dpuvlocal) >= tol:
-#                     maxUVindex = dispUV.index(max(dispUV))
-#                     mpU = subDivs[maxUVindex][0]
-#                     mpV = subDivs[maxUVindex][1]
-#                     dpuvlocal = max(dispUV)
-#                 else:
-#                     tolFlag += 1
-#             else:
-#                 if np.abs(min(dispUV) - dpuvlocal) >= tol:
-#                     minUVindex = dispUV.index(min(dispUV))
-#                     mpU = subDivs[minUVindex][0]
-#                     mpV = subDivs[minUVindex][1]
-#                     dpuvlocal = min(dispUV)
-#                 else:
-#                     tolFlag += 1
-#         return (mpU, mpV,)
-#
-#     def NewtonRaphson(cuv, maxits=5):
-#
-#         # def f(uv):
-#         #     return surface.derivatives(uv[0], uv[1], 2)
-#
-#         # e[0][0], the surface point itself
-#         # e[0][1], the 1st derivative w.r.t. v
-#         # e[2][1], the 2nd derivative w.r.t. u and 1st derivative w.r.t. v
-#
-#         def n(uv, e, r):  # np.array inputs
-#             #   f = Su(u,v) * r = 0
-#             #   g = Sv(u,v) * r = 0
-#
-#             Su = e[1][0]
-#             Sv = e[0][1]
-#
-#             Suu = e[2][0]
-#             Svv = e[0][2]
-#
-#             Suv = e[1][1]
-#             Svu = e[1][1]
-#
-#             f = np.dot(Su, r)
-#             g = np.dot(Sv, r)
-#             k = [-f, -g]
-#
-#             J00 = np.dot(Su, Su) + np.dot(Suu, r)
-#             J01 = np.dot(Su, Sv) + np.dot(Suv, r)
-#             J10 = np.dot(Su, Sv) + np.dot(Svu, r)
-#             J11 = np.dot(Sv, Sv) + np.dot(Svv, r)
-#
-#             # d =   [ u* - u, v* - v ]
-#             # k = - [ f(u,v), g(u,v) ]
-#             # J =   |Su|^2   +  Suu * r       Su*Sv  +  Suv * r
-#             #        Su*Sv   +  Svu * r      |Sv|^2  +  Svv * r
-#
-#             J = [[J00, J01], [J10, J11]]
-#             d = np.linalg.solve(J, k)
-#             return d + uv
-#
-#         i = 0
-#         # e = None
-#         while i < maxits:
-#             if (cuv[0] < 0) or (cuv[0] > 1) or (cuv[1] < 0) or (cuv[1] > 1):
-#                 return (np.inf, np.inf) # derivatives sometimes > |2|
-#
-#             #test = S.derivatives(1.0, 0.0, 0)
-#
-#             e = np.array(S.derivatives(cuv[0], cuv[1], 2))
-#             dif = e[0][0] - p # e[0][0] is surface point evaluated at cuv(u,v)
-#             c1v = np.linalg.norm(dif)
-#             c1 = c1v < eps1 #  |S(u,v) - p| < e1 (point coincidence)
-#
-#             #  |Su(u,v)*(S(u,v) - P)|
-#             #  ----------------------  < e2 (cosine minima)
-#             #  |Su(u,v)| |S(u,v) - P|
-#
-#             c2an = np.dot(e[1][0], dif)
-#             c2ad = np.linalg.norm(e[1][0]) * c1v
-#             c2av = c2an / c2ad
-#             c2a = c2av < eps2
-#
-#             #  |Sv(u,v)*(S(u,v) - P)|
-#             #  ----------------------  < e2 (cosine minima)
-#             #  |Sv(u,v)| |S(u,v) - P|
-#
-#             c2bn = np.dot(e[0][1], dif)
-#             c2bd = np.linalg.norm(e[0][1]) * c1v
-#             c2bv = c2bn / c2bd
-#             c2b = c2bv < eps2
-#
-#             # exit if all tolerance are met,
-#             if (c1 and c2a and c2b):
-#                 return cuv
-#
-#             # otherwise, take a step
-#             ct = n(cuv, e, dif)
-#
-#             #  correct for exceeding bounds
-#             if ct[0] < S.knotvector_u[0]: # [ maxu - ( ct[0] - minu ), ct[1] ]
-#                 if closedU(): ct = [S.knotvector_u[-1] - (S.knotvector_u[0] - ct[0]), ct[1]]
-#                 #if closedU(): ct = [S.knotvector_u[0] + ct[0] % (S.knotvector_u[-1] - S.knotvector_u[0]), ct[1]]
-#                 else: ct = [S.knotvector_u[0] + eps_bspline, ct[1]]
-#
-#             elif ct[0] > S.knotvector_u[-1]:
-#                 if closedU(): ct = [S.knotvector_u[0] + (ct[0] - S.knotvector_u[-1]), ct[1]]
-#                 #if closedU(): ct = [S.knotvector_u[-1] - ct[0] % (S.knotvector_u[-1] - S.knotvector_u[0]), ct[1]]
-#                 else: ct = [S.knotvector_u[-1] - eps_bspline, ct[1]]
-#
-#             if ct[1] < S.knotvector_v[0]:
-#                 if closedV(): ct = [ct[0], S.knotvector_v[-1] - (S.knotvector_v[0] - ct[1])]
-#                 #if closedV(): ct = [ct[0], S.knotvector_v[0] + ct[1] % (S.knotvector_v[-1] - S.knotvector_v[0])]
-#                 else: ct = [ct[0], S.knotvector_v[0] + eps_bspline]
-#
-#             elif ct[1] > S.knotvector_v[-1]:
-#                 #if closedV(): ct = [ct[0], S.knotvector_v[0] + (ct[1] - S.knotvector_v[-1])]
-#                 if closedV(): ct = [ct[0], S.knotvector_v[-1] - ct[1] % (S.knotvector_v[-1] - S.knotvector_v[0])]
-#                 else: ct = [ct[0], S.knotvector_v[-1] - eps_bspline]
-#
-#             c3v0 = np.linalg.norm((ct[0] - cuv[0]) * e[1][0])
-#             c3v1 = np.linalg.norm((ct[1] - cuv[1]) * e[0][1])
-#
-#             # if |(u* - u) C'(u)| < e1, halt
-#             if (c3v0 + c3v1 < eps1):
-#                 return cuv
-#             cuv = ct
-#             i += 1
-#
-#         if i == maxits:  # Newton-Raphson fails
-#             return (np.inf, np.inf)
-#         return cuv
-#
-#     if curvatureTest:  # discrete grid summing curvatures along U and V axes
-#         localExtremaUV, localExtremaP, maxBound = localCurvatureExtrema(curvatureSearch())
-#     else:
-#         localExtremaUV, localExtremaP, maxBound = localNeighbourSearch(S)
-#
-#     extremaUV = []
-#     for luv, lp, mb in zip(localExtremaUV, localExtremaP, maxBound):
-#         #mUV = subSearchUV(luv[0], luv[1], eps_bspline)
-#         mUV = NewtonRaphson(luv)
-#
-#         if not np.inf in mUV:
-#             # find a maximum deviation to indicate when N-R fails
-#             if np.linalg.norm(lp - np.array(S.evaluate_single(mUV))) <= mb:
-#                 extremaUV.append(mUV)
-#             else:
-#                 mUV = (np.inf, np.inf)
-#         if np.inf in mUV:
-#             # Newton-Raphson fail, try hillclimb
-#             mUV = subSearchUV(luv[0], luv[1], eps_bspline)
-#             extremaUV.append(mUV)
-#         # print(S.evalpts[(S.sample_size_u * luv[0]) + luv[1]])
-#
-#     # filter out identical values
-#     extremaUnique = []
-#     for m in extremaUV:
-#         # displacement between any 2 points < eps1
-#         # compare u, v individually to reduce comparison pool
-#         if not any([np.isclose(m, u, eps1).all() for u in extremaUnique]):
-#             extremaUnique.append(m)
-#
-#     # print(S.evaluate_list(extremaUnique))
-#
-#     if len(extremaUnique) == 0: return []
-#
-#     if (localExtrema and (len(extremaUnique) == 1)) or not localExtrema:  # if there is only one extrema, localextrema is moot
-#         if uv_xyz: return extremaUnique # return single value in list for compatibility
-#         else: return [np.array(S.evaluate_single(extremaUnique[0])),]
-#     else:
-#         if localExtrema:
-#             if uv_xyz: return extremaUnique
-#             else: return S.evaluate_list(extremaUnique)
-#         else: # return single maxima
-#             extremaUniquePoint = S.evaluate_list(extremaUnique)
-#             dispsExtrema = [np.linalg.norm(np.array(e) - p) for e in extremaUniquePoint]
-#             if maxSearch: # return single value in list for compatibility
-#                 if uv_xyz: return [extremaUnique[dispsExtrema.index(max(dispsExtrema))],]
-#                 else: return [np.array(extremaUniquePoint[dispsExtrema.index(max(dispsExtrema))]),]
-#             else: # minsearch
-#                 if uv_xyz: return [extremaUnique[dispsExtrema.index(min(dispsExtrema))],]
-#                 else: return [np.array(extremaUniquePoint[dispsExtrema.index(min(dispsExtrema))]),]
-
-
-# def rationalSurfaceExtremaParam_4(S, p,
-#                                   maxSearch=True,
-#                                   localExtrema=False,
-#                                   curvatureTest=False,
-#                                   uv_xyz=True,
-#                                   eps1=0.0001,
-#                                   eps2=0.0005,
-#                                   delta=0.025,
-#                                   eps_bspline = 1E-10):
-#     '''
-#     Use either Newton-Raphson, or a hillclimbing neighbour search to find minimal or maximal distance on a surface, S, from a supplied point, p
-#     - not tested with surfaces closed along U & V
-#     maxSearch: search for most distant point from p if true, else nearest if false
-#     localExtrema: find any local extrema which differs from surrounding sample points, tolerance not sufficiently defined
-#     curvatureTest: rather than displacement of sampled points to provide seed locations for N-R/hillclimb search,
-#     use a combination of the centres of curvature at any point across U-axis and V-axis to identify C2 inflection point.
-#     uv_xyz: return u,v normalised values or cartesian x,y,z values
-#     eps1: point coincidence limit, halt N-R on reaching this minima
-#     eps2: cosine angle limit, halt N-R on reaching this minima
-#     delta: sample interval dividing surface into points
-#     '''
-#
-#     # easy to find a minimum, but a maximum found through the original hillclimbing algorithm will settle on local maxima
-#     # for surfaces, minimize the following:
-#     #
-#     # f = Su(u,v) * r = 0
-#     # g = Sv(u,v) * r = 0
-#     #
-#     #   where r = S(u,v) - P
-#     #
-#     # Requires Newton-Raphson iteration, objective function is vector valued
-#     #
-#     #     J d = k
-#     #
-#     #     d =   [ u* - u, v* - v ] (alternatively u[i+1] -  u[i], v[i+1]- v[i])
-#     #     k = - [ f(u,v), g(u,v) ]
-#     #     J =     |Su|^2   +  Suu * r       Su*Sv  +  Suv * r
-#     #              Su*Sv   +  Svu * r      |Sv|^2  +  Svv * r
-#     #
-#     # halting conditions:
-#     # point coincidence
-#     #
-#     #         |S(u,v) - p| < e1
-#     #
-#     # cosine
-#     #
-#     #    |Su(u,v)*(S(u,v) - P)|
-#     #    ----------------------  < e2
-#     #    |Su(u,v)| |S(u,v) - P|
-#     #
-#     #    |Sv(u,v)*(S(u,v) - P)|
-#     #    ----------------------  < e2
-#     #    |Sv(u,v)| |S(u,v) - P|
-#     #
-#     # 1) first check 2 & 3
-#     # 2) if at least one of these is not, compute new value, otherwise halt
-#     # 3) ensure the parameter stays within range
-#     #     * if not closed, don't allow outside of range a-b
-#     #     * if closed (e.g. circle), allow to move back to beginning
-#     # 4)  if |(u* - u)C'(u)| < e1, halt
-#
-#     # todo: take value from STEP fields
-#     # check if surface closed along U and V
-#
-#     def closedU():
-#         return np.isclose([np.array(s[0]) - np.array(s[-1]) for s in S.ctrlpts2d], eps_bspline).all()
-#
-#     def closedV():
-#         return np.isclose(np.array(S.ctrlpts2d[0]) - np.array(S.ctrlpts2d[-1]), eps_bspline).all()  # eps_STEP_AP21
-#
-#     S.delta = delta  # set evaluation delta
-#     # tradeoff between sample density and feature identification
-#
-#     if S.evalpts == None:  # evaluate surface points---------appears redundant
-#         S.evaluate()
-#
-#     def neighbouringUV(S):
-#         # generator function to yield neighbouring indices over a matrix of size U x V
-#
-#         U = S.sample_size_u
-#         V = S.sample_size_v
-#
-#         openU = not closedU()
-#         openV = not closedV()
-#
-#         for v in range(openV, V - openV):
-#             for u in range(openU, U - openU):
-#
-#                 if openV == 0 and openU == 0:
-#                     if ((u == 0 and v == 0) or
-#                         (u == 0 and v == V - 1) or
-#                         (u == U - 1 and v == 0) or
-#                         (u == U - 1 and v == V - 1)):
-#                         # how does the topology of closed U & V work anyway?
-#                         continue
-#
-#                 if u == 0:  # closed in u direction
-#                     if v == V - 1:  # closed in v direction
-#                         NW = (U * (v + 1)) - 1
-#                     else:
-#                         NW = (U * (v + 2)) - 1
-#
-#                     W = (U * (v + 1)) - 1
-#
-#                     if v == 0:
-#                         SW = U - 1
-#                     else:
-#                         SW = (U * v) - 1
-#
-#                     if v == V - 1:  # closed in v direction
-#                         N = u
-#                     else:
-#                         N = U * (v + 1)
-#
-#                     C = U * v
-#
-#                     if v == 0:
-#                         S = U
-#                     else:
-#                         S = U * (v - 1)
-#
-#                 if u == 1:
-#                     if v == V - 1:  # closed in v direction
-#                         NW = u - 1
-#                     else:
-#                         NW = U * (v + 1)
-#
-#                     W = U * v
-#
-#                     if v == 0:
-#                         SW = U * (V - 1)
-#                     else:
-#                         SW = U * (v - 1)  # ??
-#
-#                     if v == V - 1:  # closed in v direction
-#                         N = u
-#                     else:
-#                         N = (U * (v + 1)) + 1
-#
-#                     C = (U * v) + 1
-#
-#                     if v == 0:
-#                         S = (U * (V - 1)) + 1
-#                     else:
-#                         S = (U * (v - 1)) + 1
-#
-#                 if u > 1:
-#                     NW = N
-#                     W = C  # central instance
-#                     SW = S
-#
-#                     N = NE
-#                     C = E
-#                     S = SE
-#
-#                 elif u == U - 1:  # closed in u direction
-#                     if v == V - 1:  # closed in v direction
-#                         NE = u
-#                     else:
-#                         NE = (U * (v + 1)) + 1
-#
-#                     E = (U * v) + 1
-#
-#                     if v == 0:
-#                         SE = (U * (V - 1)) + u + 1
-#                     else:
-#                         SE = (U * (v - 2)) + 1
-#
-#                 if u < U - 1:  # only have to calculate this once per loop
-#                     if v == V - 1:  # closed in v direction
-#                         NE = u + 1
-#                     else:
-#                         NE = (U * (v + 1)) + u + 1
-#
-#                     E = (U * v) + u + 1
-#
-#                     if v == 0:
-#                         SE = (U * (V - 1)) + u + 1
-#                     else:
-#                         SE = (U * (v - 1)) + u + 1
-#
-#                 # print([NW, N, NE])
-#                 # print([W, C, E])
-#                 # print([SW, S, SE])
-#                 # print("==========")
-#
-#                 yield ([NW, N, NE, W, C, E, SW, S, SE], (v, u))
-#
-#     def localNeighbourSearch():
-#         extremaUV = []
-#
-#         for CC, uv in neighbouringUV(S):
-#             dpuv_NW = np.linalg.norm(p - np.array(S.evalpts[CC[0]]))
-#             dpuv_N  = np.linalg.norm(p - np.array(S.evalpts[CC[1]]))
-#             dpuv_NE = np.linalg.norm(p - np.array(S.evalpts[CC[2]]))
-#             dpuv_E  = np.linalg.norm(p - np.array(S.evalpts[CC[3]]))
-#             dpuv    = np.linalg.norm(p - np.array(S.evalpts[CC[4]]))
-#             dpuv_W  = np.linalg.norm(p - np.array(S.evalpts[CC[5]]))
-#             dpuv_SW = np.linalg.norm(p - np.array(S.evalpts[CC[6]]))
-#             dpuv_S  = np.linalg.norm(p - np.array(S.evalpts[CC[7]]))
-#             dpuv_SE = np.linalg.norm(p - np.array(S.evalpts[CC[8]]))
-#
-#             if maxSearch:
-#                 if ((dpuv >= dpuv_NW) and (dpuv >= dpuv_N) and (dpuv >= dpuv_NE) and
-#                         (dpuv >= dpuv_W) and (dpuv >= dpuv_E) and
-#                         (dpuv >= dpuv_SW) and (dpuv >= dpuv_S) and (dpuv >= dpuv_SE)):
-#                     extremaUV.append(uv)
-#             else:  # minS
-#                 if ((dpuv <= dpuv_NW) and (dpuv <= dpuv_N) and (dpuv <= dpuv_NE) and
-#                         (dpuv <= dpuv_W) and (dpuv <= dpuv_E) and
-#                         (dpuv <= dpuv_SW) and (dpuv <= dpuv_S) and (dpuv <= dpuv_SE)):
-#                     # where a point is orthogonal to a planar surface -> sphere radius test, or accept minima
-#                     extremaUV.append(uv)
-#
-#         return extremaUV
-#
-#     def curvatureSearch():
-#         discreteK = [np.inf] * len(S.evalpts)
-#         for CC, uv in neighbouringUV(S):
-#
-#             puv = np.array(S.evalpts[CC[4]])
-#             pur, pucc = radiusCentre3points_2(np.array(S.evalpts[CC[3]]), puv, np.array(S.evalpts[CC[5]]))
-#             pvr, pvcc = radiusCentre3points_2(np.array(S.evalpts[CC[7]]), puv, np.array(S.evalpts[CC[1]]))
-#
-#             # S.evalpts[(S.sample_size_u * u) + v]
-#
-#             # find media point of U curvature centre and V curvature, kuv
-#             if pur is np.inf and pvr is not np.inf:
-#                 kuv = pvcc - puv
-#             elif pur is not np.inf and pvr is np.inf:
-#                 kuv = pucc - puv
-#             elif pur is np.inf and pvr is np.inf:
-#                 discreteK[(S.sample_size_u * uv[0]) + uv[1]] = np.inf
-#                 break
-#             else:
-#                 kuv = ((pucc - puv) + (pvcc - puv)) / 2
-#
-#             dkuv = np.linalg.norm(kuv - puv)
-#
-#             if np.linalg.norm(p - puv) > np.linalg.norm(kuv - p):
-#                 # p is on the same side of the surface as the median curvature
-#                 discreteK[(S.sample_size_u * uv[0]) + uv[1]] = dkuv
-#
-#             if np.linalg.norm(p - puv) < np.linalg.norm(kuv - p):
-#                 # smallest radius, with curvature centre on far side of surface from p
-#                 discreteK[(S.sample_size_u * uv[0]) + uv[1]] = -dkuv
-#
-#             # todo: examine issue with non-colinear curve centre and projecting point
-#             # e.g. proj(p)
-#             #                 if np.dot(p - p1, pucc - p1)/np.linalg.norm(pucc - p1) > 0:
-#             #                     discreteK[i] = pur
-#             #                 else:
-#             #                     discreteK[i] = -pur
-#
-#         return discreteK
-#
-#     def localCurvatureExtrema(discreteK):
-#         leu = []
-#         for CC, uv in neighbouringUV(S):
-#             surroundNodes = [CC[1], CC[3], CC[5], CC[7]]
-#
-#             if not any(discreteK[ssn] == np.inf for ssn in surroundNodes):
-#                 if maxSearch:
-#                     if (all((np.abs(discreteK[ssn]) >= discreteK[(S.sample_size_u * uv[0]) + uv[1]]) for ssn in surroundNodes) and
-#                             (discreteK[(S.sample_size_u * uv[0]) + uv[1]] > 0)):
-#                         # this version excludes negative curves from surrounding curvature values
-#                         # if all(np.abs(discreteK[ssn]) > discreteK[S.sample_size_u * u + v] or
-#                         # (discreteK[ssn]<0) for ssn in surroundNodes) and
-#                         # (discreteK[S.sample_size_u * u + v] > 0):
-#                         leu.append(uv)
-#                 else:
-#                     if all((np.abs(discreteK[ssn]) >= discreteK[(S.sample_size_u * uv[0]) + uv[1]]) for ssn in
-#                            surroundNodes) and (discreteK[(S.sample_size_u * uv[0]) + uv[1]] < 0):
-#                         leu.append(uv)
-#         return leu
-#
-#     def subSearchUV(mpU, mpV, tol):
-#         # create simple subdivisions around a minimum point as simple hillclimb search
-#         tolFlag = 0
-#         divU = S.delta_u
-#         divV = S.delta_v
-#         dpuvlocal = np.linalg.norm(p - S.evaluate_single((mpU, mpV,)))
-#
-#         while not tolFlag:
-#             divU /= 2
-#             divV /= 2
-#
-#             subDivs = [(mpU - divU, mpV + divV),
-#                        (mpU, mpV + divV),
-#                        (mpU + divU, mpV + divV),
-#                        (mpU - divU, mpV),
-#                        (mpU, mpV),
-#                        (mpU + divU, mpV),
-#                        (mpU - divU, mpV - divV),
-#                        (mpU, mpV - divV),
-#                        (mpU + divU, mpV - divV)]
-#
-#             pSubDivs = S.evaluate_list(subDivs)
-#
-#             dpuv_NW = np.linalg.norm(p - pSubDivs[0])
-#             dpuv_N = np.linalg.norm(p - pSubDivs[1])
-#             dpuv_NE = np.linalg.norm(p - pSubDivs[2])
-#
-#             dpuv_W = np.linalg.norm(p - pSubDivs[3])
-#             # dpuv = np.linalg.norm(p - pSubDivs[4])
-#             dpuv_E = np.linalg.norm(p - pSubDivs[5])
-#
-#             dpuv_SW = np.linalg.norm(p - pSubDivs[6])
-#             dpuv_S = np.linalg.norm(p - pSubDivs[7])
-#             dpuv_SE = np.linalg.norm(p - pSubDivs[8])
-#
-#             dispUV = [dpuv_NW,
-#                       dpuv_N,
-#                       dpuv_NE,
-#                       dpuv_W,
-#                       dpuvlocal,
-#                       dpuv_E,
-#                       dpuv_SW,
-#                       dpuv_S,
-#                       dpuv_SE]
-#
-#             if maxSearch:
-#                 if np.abs(max(dispUV) - dpuvlocal) >= tol:
-#                     maxUVindex = dispUV.index(max(dispUV))
-#                     mpU = subDivs[maxUVindex][0]
-#                     mpV = subDivs[maxUVindex][1]
-#                     dpuvlocal = max(dispUV)
-#                 else:
-#                     tolFlag += 1
-#             else:
-#                 if np.abs(min(dispUV) - dpuvlocal) >= tol:
-#                     minUVindex = dispUV.index(min(dispUV))
-#                     mpU = subDivs[minUVindex][0]
-#                     mpV = subDivs[minUVindex][1]
-#                     dpuvlocal = min(dispUV)
-#                 else:
-#                     tolFlag += 1
-#         return (mpU, mpV,)
-#
-#     def NewtonRaphson(cuv, maxits=5):
-#
-#         # def f(uv):
-#         #     return surface.derivatives(uv[0], uv[1], 2)
-#
-#         def n(uv, e, r):  # np.array inputs
-#             #   f = Su(u,v) * r = 0
-#             #   g = Sv(u,v) * r = 0
-#
-#             Su = e[1][0]
-#             Sv = e[0][1]
-#
-#             Suu = e[2][0]
-#             Svv = e[0][2]
-#
-#             Suv = e[1][1]
-#             Svu = e[1][1]
-#
-#             f = np.dot(Su, r)
-#             g = np.dot(Sv, r)
-#             k = [-f, -g]
-#
-#             J00 = np.dot(Su, Su) + np.dot(Suu, r)
-#             J01 = np.dot(Su, Sv) + np.dot(Suv, r)
-#             J10 = np.dot(Su, Sv) + np.dot(Svu, r)
-#             J11 = np.dot(Sv, Sv) + np.dot(Svv, r)
-#
-#             # d =   [ u* - u, v* - v ]
-#             # k = - [ f(u,v), g(u,v) ]
-#             # J =   |Su|^2   +  Suu * r       Su*Sv  +  Suv * r
-#             #        Su*Sv   +  Svu * r      |Sv|^2  +  Svv * r
-#
-#             J = [[J00, J01], [J10, J11]]
-#             d = np.linalg.solve(J, k)
-#             return d + uv
-#
-#         i = 0
-#         # e = None
-#         while i < maxits:
-#
-#             e = np.array(S.derivatives(cuv[0], cuv[1], 2))
-#             dif = e[0][0] - p
-#             c1v = np.linalg.norm(dif)   #  |S(u,v) - p| < e1 (point coincidence)
-#
-#             #  |Su(u,v)*(S(u,v) - P)|
-#             #  ----------------------  < e2 (cosine minima)
-#             #  |Su(u,v)| |S(u,v) - P|
-#
-#             c2an = np.dot(e[1][0], dif)
-#             c2ad = np.linalg.norm(e[1][0]) * c1v
-#             c2bn = np.dot(e[0][1], dif)
-#             c2bd = np.linalg.norm(e[0][1]) * c1v
-#             c2av = c2an / c2ad
-#             c2bv = c2bn / c2bd
-#             c1 = c1v < eps1
-#             c2a = c2av < eps2
-#             c2b = c2bv < eps2
-#
-#             # exit if all tolerance are met,
-#             if (c1 and c2a and c2b): return cuv
-#
-#             # otherwise, take a step
-#             ct = n(cuv, e, dif)
-#
-#             #  correct for exceeding bounds
-#             if ct[0] < S.knotvector_u[0]: # [ maxu - ( ct[0] - minu ), ct[1] ]
-#                 #if closedU(): ct = [S.knotvector_u[-1] - (ct[0] - S.knotvector_u[0]), ct[1]] #- incorrect in Piegel Tiller NURBS book
-#                 if closedU(): ct = [S.knotvector_u[-1] - (S.knotvector_u[0] - ct[0]), ct[1]]
-#                 else: ct = [S.knotvector_u[0] + eps_bspline, ct[1]]
-#
-#             elif ct[0] > S.knotvector_u[-1]: # [ minu + ( ct[0] - maxu ), ct[1] ]
-#                 #if closedU(): ct = [S.knotvector_u[0] + (ct[0] - S.knotvector_u[-1]), ct[1]]
-#                 if closedU(): ct = [S.knotvector_u[0] + (ct[0] % S.knotvector_u[-1]), ct[1]]
-#                 #if closedU(): ct = [S.knotvector_u[0] + (S.knotvector_u[-1] - ct[0]), ct[1]]
-#                 else: ct = [S.knotvector_u[-1] - eps_bspline, ct[1]]
-#
-#             if ct[1] < S.knotvector_v[0]: # [ ct[0], maxv - ( ct[1] - minv ) ]
-#                 if closedV(): ct = [ct[0], S.knotvector_v[-1] - (ct[1] - S.knotvector_v[0])]
-#                 #if closedV(): ct = [ct[0], S.knotvector_v[-1] - (S.knotvector_v[0] - ct[1])]
-#                 else: ct = [ct[0], S.knotvector_v[0] + eps_bspline]
-#
-#             elif ct[1] > S.knotvector_v[-1]: # [ ct[0], minv + ( ct[0] - maxv ) ]
-#                 if closedV(): ct = [ct[0], S.knotvector_v[0] + (ct[0] - S.knotvector_v[-1])]
-#                 else: ct = [ct[0], S.knotvector_v[-1] - eps_bspline]
-#
-#             # if ( ct[0] < minu ){
-#             #                 ct = closedu ? [ maxu - ( ct[0] - minu ), ct[1] ] : [ minu + Constants.EPSILON, ct[1] ];
-#             #             } else if (ct[0] > maxu){
-#             #                 ct = closedu ? [ minu + ( ct[0] - maxu ), ct[1] ] : [ maxu - Constants.EPSILON, ct[1] ];
-#             #             }
-#             #
-#             #             if ( ct[1] < minv ){
-#             #                 ct = closedv ? [ ct[0], maxv - ( ct[1] - minv ) ] : [ ct[0], minv + Constants.EPSILON ];
-#             #             } else if (ct[1] > maxv){
-#             #                 ct = closedv ? [ ct[0], minv + ( ct[0] - maxv ) ] : [ ct[0], maxv - Constants.EPSILON ];
-#             #             }
-#
-#             c3v0 = np.linalg.norm((ct[0] - cuv[0]) * e[1][0])
-#             c3v1 = np.linalg.norm((ct[1] - cuv[1]) * e[0][1])
-#
-#             # if |(u* - u) C'(u)| < e1, halt
-#             if (c3v0 + c3v1 < eps1):
-#                 return cuv
-#             cuv = ct
-#             i += 1
-#
-#         if i == maxits:  # Newton-Raphson fails
-#             return (np.inf, np.inf)
-#         return cuv
-#
-#     if curvatureTest:  # discrete grid summing curvatures along U and V axes
-#         localExtremaUV = localCurvatureExtrema(curvatureSearch())
-#     else:
-#         localExtremaUV = localNeighbourSearch()
-#
-#     extremaUV = []
-#     for luv in localExtremaUV:
-#         # print(luv[0] * S.delta_u, luv[1] * S.delta_v,)
-#         # tc = NewtonRaphson((luv[0] * S.delta_u, luv[1] * S.delta_v,))
-#         # print(S.evaluate_single(tc))
-#         mUV = NewtonRaphson((luv[0] * S.delta_u, luv[1] * S.delta_v,))
-#         if np.inf not in mUV:
-#             extremaUV.append(mUV)
-#         else:
-#             # Newton-Raphson fail, try hillclimb
-#             mUV = subSearchUV(luv[0] * S.delta_u, luv[1] * S.delta_v, eps_bspline)
-#             extremaUV.append(mUV)
-#         # print(S.evalpts[(S.sample_size_u * luv[0]) + luv[1]])
-#
-#     # filter out identical values
-#     extremaUnique = []
-#     for m in extremaUV:
-#         # displacement between any 2 points < eps1
-#         # compare u, v individually to reduce comparison pool
-#         if not any([np.isclose(m, u, eps1).all() for u in extremaUnique]):
-#             extremaUnique.append(m)
-#
-#     # print(S.evaluate_list(extremaUnique))
-#
-#     if len(extremaUnique) == 0: return []
-#
-#     # if localExtrema and (len(extremaUnique) > 1):  # if there is only one extrema, localextrema is moot
-#     #     if uv_xyz: return extremaUnique
-#     #     else: return S.evaluate_list(extremaUnique)
-#     # else:
-#     #     extremaUniquePoint = S.evaluate_list(extremaUnique)
-#     #     dispsExtrema = [np.linalg.norm(np.array(e) - p) for e in extremaUniquePoint]
-#     #     if maxSearch:
-#     #         if uv_xyz: return [extremaUnique[dispsExtrema.index(max(dispsExtrema))],]
-#     #         else: return [extremaUniquePoint[dispsExtrema.index(max(dispsExtrema))],]
-#     #     else:
-#     #         if uv_xyz: return [extremaUnique[dispsExtrema.index(min(dispsExtrema))],]
-#     #         else: return [extremaUniquePoint[dispsExtrema.index(min(dispsExtrema))].]
-#
-#     if (localExtrema and (len(extremaUnique) == 1)) or not localExtrema:  # if there is only one extrema, localextrema is moot
-#         if uv_xyz: return extremaUnique # return single value in list for compatibility
-#         else: return [np.array(S.evaluate_single(extremaUnique[0])),]
-#     else:
-#         if localExtrema:
-#             if uv_xyz: return extremaUnique
-#             else: return S.evaluate_list(extremaUnique)
-#         else: # return single maxima
-#             extremaUniquePoint = S.evaluate_list(extremaUnique)
-#             dispsExtrema = [np.linalg.norm(np.array(e) - p) for e in extremaUniquePoint]
-#             if maxSearch: # return single value in list for compatibility
-#                 if uv_xyz: return [extremaUnique[dispsExtrema.index(max(dispsExtrema))],]
-#                 else: return [np.array(extremaUniquePoint[dispsExtrema.index(max(dispsExtrema))]),]
-#             else: # minsearch
-#                 if uv_xyz: return [extremaUnique[dispsExtrema.index(min(dispsExtrema))],]
-#                 else: return [np.array(extremaUniquePoint[dispsExtrema.index(min(dispsExtrema))]),]
-
-
-# def BsplineCurveExtremaDisp(curve, p,
-#                             maxSearch=True,
-#                             localExtrema=False,
-#                             curvatureTest=False,
-#                             uv_xyz=True,
-#                             eps1=0.0001,
-#                             eps2=0.0005,
-#                             delta=0.025,
-#                             eps_bspline = 1E-10):
-#
-#     # based on Nurbs Book, Piegl & Tiller p.230
-#     # same idea to find orthogonal tangent, but at maximum/minimum displacement from a centroid point
-#     # revised to test minima segment candidates using 3-point defined circle parameters
-#
-#     # def radiusCentre3points2(p1, p2, p3):
-#     #     # radius + centre from 3 point circle
-#     #
-#     #     #collinear test
-#     #     coords = np.array([p1, p2, p3])
-#     #     coords -= coords[0]  # offset for collinear points to intersect the origin
-#     #     if np.linalg.matrix_rank(coords, tol=None) == 1:
-#     #         return np.inf, []
-#     #
-#     #     t = p2 - p1
-#     #     u = p3 - p1
-#     #     v = p3 - p2
-#     #
-#     #     w = np.cross(t, u)  # triangle normal
-#     #     wsl = np.linalg.norm(w)
-#     #     if (wsl < 10e-14):
-#     #         return False  # triangle area too small
-#     #
-#     #     wsl = np.dot(w, w)
-#     #     iwsl2 = 1. / (2. * wsl)
-#     #     tt = np.dot(t, t)
-#     #     uu = np.dot(u, u)
-#     #
-#     #     circCenter = p1 + (u * tt * (np.dot(u, v)) - t * uu * (np.dot(t, v))) * iwsl2
-#     #     circRadius = np.sqrt(tt * uu * (np.dot(v, v)) * iwsl2 * 0.5)
-#     #     # circAxis   = w / np.sqrt(wsl)
-#     #
-#     #     return circRadius, circCenter
-#
-#     # eps1 = 0.0001   # Euclidean distance measure
-#     # eps2 = 0.0005   # zero cosine measure
-#     # eps_bspline = 1E-10
-#     minU = curve.knotvector[0]
-#     maxU = curve.knotvector[-1]
-#
-#     def closedC():
-#         return np.isclose(np.linalg.norm(np.array(curve.ctrlpts[0]) - np.array(curve.ctrlpts[-1])), eps_bspline)
-#
-#     def subSearchU(C, mpU, tol):
-#         # create simple subdivisions around a minimum point on curve as simple hillclimb search
-#         tolFlag = 0
-#         divU = C.delta
-#         dpulocal = np.linalg.norm(p - C.evaluate_single(mpU))
-#
-#         while not tolFlag:
-#             divU /= 2
-#             subDivs = [mpU - divU, mpU, mpU + divU]
-#             pSubDivs = C.evaluate_list(subDivs)
-#
-#             dpu_L = np.linalg.norm(p - pSubDivs[0])
-#             dpu_R = np.linalg.norm(p - pSubDivs[1])
-#
-#             dispU = [dpu_L, dpulocal, dpu_R]
-#
-#             if maxSearch:
-#                 if np.abs(max(dispU) - dpulocal) >= tol:
-#                     maxUindex = dispU.index(max(dispU))
-#                     mpU = subDivs[maxUindex]
-#                     dpulocal = max(dispU)
-#                 else:
-#                     tolFlag += 1
-#             else:
-#                 if np.abs(min(dispU) - dpulocal) >= tol:
-#                     minUindex = dispU.index(min(dispU))
-#                     mpU = subDivs[minUindex]
-#                     dpulocal = min(dispU)
-#                 else:
-#                     tolFlag += 1
-#         return mpU
-#
-#     def NewtonRaphson(cu, maxits=5):
-#
-#         def n(u2, e1, d):
-#             #   Newton's method: 	 u* = u - f / f'
-#             #   use product rule to form derivative, f':   f' = C"(u) * ( C(u) - p ) + C'(u) * C'(u)
-#             #   d:  ( C(u) - p )
-#             return u2 - (np.dot(e1[1], d) / (np.dot(e1[2], d) + np.dot(e1[1], e1[1])))
-#
-#         i = 0
-#         while (i < maxits):
-#             # Newton iteration to find orthogonal tangent and is max/min agnostic
-#             e = np.array(curve.derivatives(cu, order=2))  # f(cu)
-#             dif = e[0] - p                      # C(u) - p
-#             c1v = np.linalg.norm(dif)           # |C(u) - p|
-#             c2n = np.dot(e[1], dif)             # C'(u) * (C(u) - P)
-#             c2d = np.linalg.norm(e[1]) * c1v    # |C'(u)||C(u) - P|
-#             c2v = c2n / c2d                     # |C'(u) * (C(u) - P)| / |C'(u)||C(u) - P|
-#             # c2v = np.dot(e[1], dif) / (np.linalg.norm(e[1]) * np.linalg.norm(dif))
-#
-#             if (c1v < eps1) and (np.abs(c2v) < eps2):
-#                 return cu
-#             # ct = n(cu, e, dif)                           #   u* = u - f / f'
-#             ct = cu - (np.dot(e[1], dif) / (np.dot(e[2], dif) + np.dot(e[1], e[1])))
-#
-#             if ct < minU:
-#                 if closedC(): ct = maxU - (minU - ct) # ct = maxU - (ct - minU) # NURBS book
-#                 else: ct = minU
-#
-#             elif ct > maxU:
-#                 if closedC(): ct = minU + (ct - maxU)
-#                 else: ct = maxU
-#
-#             c3v = np.linalg.norm(np.multiply(ct - cu, e[1]))
-#             if c3v < eps1:
-#                 return cu
-#
-#             cu = ct
-#             i += 1
-#
-#         if i == maxits:  # Newton-Raphson fails
-#             return np.inf
-#         return cu
-#
-#     # numSamples = curve.ctrlpts_size * curve.degree * curveSampleFactor
-#     # span = (curve.knotvector[-1] - curve.knotvector[0]) / (numSamples - 1)
-#     # kvs = np.array([curve.knotvector[0] + (span * i) for i in range(0, numSamples)])
-#     # pts = curve.evaluate_list(kvs)
-#
-#     #pts, kvs = splineToPolyline(curve, curveSampleFactor=delta) todo 1/curve.delta?
-#     pts, kvs = splineToPolyline(curve, curveSampleFactor=2)
-#
-#     # original version fails on points of equal minimal curvature
-#
-#     # 2-part selection for global maxima using both displacement and curve inflection
-#     # curve inflection determined from local curvature minima - prob doesn't work for self intersecting curves
-#     # get set of local minima curvature - use for curve characterisation
-#     # from set, find minima/maxima disp from point-of-interest to curve point tangent
-#
-#     # curvature approach fails without C2 continuity at minima/maxima?
-#     # not much of an issue with STEP spline limitations
-#
-#     if curvatureTest: discreteK = [np.inf] * len(pts)
-#
-#     localDisp = [0] * len(pts)
-#     localExtremaU = []
-#
-#     # get discrete curvature values and point displacement
-#     for i in range(1-closedC(), len(pts) - 1 + closedC()):
-#         if (i == 0):
-#             p0 = np.array(pts[-1])
-#             p1 = np.array(pts[0])
-#             p2 = np.array(pts[1])
-#
-#         elif (i == len(pts)-1):
-#             p0 = np.array(pts[-2])
-#             p1 = np.array(pts[-1])
-#             p2 = np.array(pts[0])
-#
-#         else:
-#             p0 = np.array(pts[i - 1])
-#             p1 = np.array(pts[i])
-#             p2 = np.array(pts[i + 1])
-#
-#         if i==0 or i==1 or i==len(pts)-1:
-#             dp0 = np.linalg.norm(p0 - p)
-#             dp1 = np.linalg.norm(p1 - p)
-#             dp2 = np.linalg.norm(p2 - p)
-#
-#         if (i>1) and (i<len(pts)-1):
-#             dp0 = dp1
-#             dp1 = dp2
-#             dp2 = np.linalg.norm(p2 - p)
-#
-#         if maxSearch:
-#             if (dp1 >= dp2) and (dp1 >= dp0):
-#                 localExtremaU.append(kvs[i])
-#         else:  # minS
-#             if (dp1 <= dp2) and (dp1 <= dp0):
-#                 # where a point is orthogonal to a planar surface -> sphere radius test, or accept minima
-#                 localExtremaU.append(kvs[i])
-#
-#         localDisp[i] = dp1
-#
-#         if curvatureTest:
-#             pur, pucc = radiusCentre3points_2(p0, p1, p2)
-#             if (pur == np.inf):
-#                 break
-#             else:
-#                 # p is on the same side of the surface as the mean curvature
-#                 if np.dot(p - p1, pucc - p1)/np.linalg.norm(pucc - p1) > 0:
-#                     discreteK[i] = pur
-#                 else:
-#                     discreteK[i] = -pur
-#
-#     if curvatureTest:  # discrete grid summing curvatures along U and V axes
-#         localExtremaU = []
-#
-#         # get local max curvature values
-#         for i in range(1 - closedC(), len(discreteK) - 1 + closedC()):
-#             if (i == 0):
-#                 k0 = discreteK[-1]
-#                 k1 = discreteK[0]
-#                 k2 = discreteK[1]
-#
-#             elif (i == len(discreteK) - 1):
-#                 k0 = discreteK[-2]
-#                 k1 = discreteK[-1]
-#                 k2 = discreteK[0]
-#
-#             else:
-#                 k0 = discreteK[i - 1]
-#                 k1 = discreteK[i]
-#                 k2 = discreteK[i + 1]
-#
-#             if (k0 != np.inf) and (k1 != np.inf) and (k2 != np.inf):
-#                 if (np.abs(k1) <= np.abs(k2)) and (np.abs(k1) <= np.abs(k0)):
-#                     if (k1 > 0) and maxSearch:
-#                         localExtremaU.append(kvs[i])
-#                     elif (k1 < 0) and not maxSearch:
-#                         # where a point is orthogonal to a planar surface -> sphere radius test, or accept minima
-#                         localExtremaU.append(kvs[i])
-#
-#     extremaU = []
-#     for lu in localExtremaU:
-#         mU = NewtonRaphson(lu)
-#         if mU != np.inf:
-#             extremaU.append(mU)
-#         else:
-#             # Newton-Raphson fail, try hillclimb
-#             mU = subSearchU(curve, lu, eps_bspline)
-#             extremaU.append(mU)
-#
-#     # filter out identical values
-#     extremaUnique = []
-#     for m in extremaU:
-#         # displacement between any 2 points < eps1
-#         # compare u, v individually to reduce comparison pool
-#         if not any(np.isclose(m, u, eps1).all() for u in extremaUnique):
-#             extremaUnique.append(m)
-#
-#     if len(extremaU) == 0: #return []
-#         # minima/maxima at curve ends
-#         if all([localDisp[1] < ll for ll in localDisp[2:-2]]): # u = 0
-#             if uv_xyz: return [0.,]
-#             else: return curve.evaluate_single(0.)
-#         elif all([localDisp[-2] > ll for ll in localDisp[1:-1:-3]]): # u = 1
-#             if uv_xyz: return [1.,]
-#             else: return curve.evaluate_single(1.)
-#         else:
-#             print("Bspline assumption fail")
-#
-#     if (localExtrema and (len(extremaUnique) == 1)) or not localExtrema:  # if there is only one extrema, localextrema is moot
-#         if uv_xyz: return [extremaUnique,] # return single value in list for compatibility
-#         else: return [np.array(curve.evaluate_single(extremaUnique)),]
-#     else:
-#         if localExtrema:
-#             if uv_xyz: return extremaUnique
-#             else: return curve.evaluate_list(extremaUnique)
-#         else: # return single maxima
-#             extremaUniquePoint = curve.evaluate_list(extremaUnique)
-#             dispsExtrema = [np.linalg.norm(np.array(e) - p) for e in extremaUniquePoint]
-#             if maxSearch: # return single value in list for compatibility
-#                 if uv_xyz: return [extremaUnique[dispsExtrema.index(max(dispsExtrema))],]
-#                 else: return [np.array(extremaUniquePoint[dispsExtrema.index(max(dispsExtrema))]),]
-#             else: # minsearch
-#                 if uv_xyz: return [extremaUnique[dispsExtrema.index(min(dispsExtrema))],]
-#                 else: return [np.array(extremaUniquePoint[dispsExtrema.index(min(dispsExtrema))]),]
 
 
 def BsplineCurveExtremaDisp(C, p,
@@ -2394,13 +1060,26 @@ def BsplineCurveExtremaDisp(C, p,
                             eps1=0.0001,
                             eps2=0.0005,
                             deltaFactor=4,
-                            eps_bspline = 1E-10):
+                            eps_bspline=1E-10):
+    """
+    Return parametric u,v parameters or cartesian point on a curve closest to a point based on Nurbs Book algorithm,
+    Piegl & Tiller p.230. Same idea to find orthogonal tangent, but at maximum/minimum displacement from a centroid point
+    Revised to test minima segment candidates using 3-point defined circle parameters, curvatureTest
+    If Newton-Raphson fails, resorts to a subdivision bounding box search.
 
-    # based on Nurbs Book, Piegl & Tiller p.230
-    # same idea to find orthogonal tangent, but at maximum/minimum displacement from a centroid point
-    # revised to test minima segment candidates using 3-point defined circle parameters
+    :param maxSearch: return point furthest from point if true, nearest if false
+    :param localExtrema: True for returning local maxima/minima, false for global maxima/minima point
+    :param curvatureTest: True: seed N-R with a point taken from a minima curvature
+                          False: use displacement comparison over sampled points
+    :param uv_xyz: True: return u,v, parameter, False: return x, y, z point value
+    :param eps1: Newton-Raphson halting condition
+    :param eps2: Newton-Raphson halting condition
+    :param deltaFactor: sampling factor for initial search
+    :param eps_bspline: minimal point disp for sub-sample algorithm termination, see subSearchU()
+    :return: list of Cartesian or parametric values
+    """
 
-    # def radiusCentre3points2(p1, p2, p3):
+    # def radiusCentre3points(p1, p2, p3):
     #     # radius + centre from 3 point circle
     #
     #     #collinear test
@@ -2432,16 +1111,14 @@ def BsplineCurveExtremaDisp(C, p,
     # eps1 = 0.0001   # Euclidean distance measure
     # eps2 = 0.0005   # zero cosine measure
     # eps_bspline = 1E-10
-    # minU = C.knotvector[0]
-    # maxU = C.knotvector[-1]
 
-    C.delta = 1 / len(C.knotvector) * deltaFactor
+    C.delta = 1 / (len(C.knotvector) * deltaFactor)
 
     def closedC():
         return np.isclose(np.linalg.norm(np.array(C.ctrlpts[0]) - np.array(C.ctrlpts[-1])), eps_bspline)
 
     def localDispTest():
-        #localDisp = [0] * len(pts)
+        # localDisp = [0] * len(pts)
         localExtremaU = []
 
         # get discrete curvature values and point displacement
@@ -2479,7 +1156,7 @@ def BsplineCurveExtremaDisp(C, p,
                     # where a point is orthogonal to a planar surface -> sphere radius test, or accept minima
                     localExtremaU.append(kvs[i])
 
-            #localDisp[i] = dp1
+            # localDisp[i] = dp1
 
         return localExtremaU
 
@@ -2587,11 +1264,11 @@ def BsplineCurveExtremaDisp(C, p,
         while (i < maxits):
             # Newton iteration to find orthogonal tangent and is max/min agnostic
             e = np.array(C.derivatives(cu, order=2))  # f(cu)
-            dif = e[0] - p                      # C(u) - p
-            c1v = np.linalg.norm(dif)           # |C(u) - p|
-            c2n = np.dot(e[1], dif)             # C'(u) * (C(u) - P)
-            c2d = np.linalg.norm(e[1]) * c1v    # |C'(u)||C(u) - P|
-            c2v = c2n / c2d                     # |C'(u) * (C(u) - P)| / |C'(u)||C(u) - P|
+            dif = e[0] - p  # C(u) - p
+            c1v = np.linalg.norm(dif)  # |C(u) - p|
+            c2n = np.dot(e[1], dif)  # C'(u) * (C(u) - P)
+            c2d = np.linalg.norm(e[1]) * c1v  # |C'(u)||C(u) - P|
+            c2v = c2n / c2d  # |C'(u) * (C(u) - P)| / |C'(u)||C(u) - P|
             # c2v = np.dot(e[1], dif) / (np.linalg.norm(e[1]) * np.linalg.norm(dif))
 
             if (c1v < eps1) and (np.abs(c2v) < eps2):
@@ -2601,14 +1278,18 @@ def BsplineCurveExtremaDisp(C, p,
 
             #  correct for exceeding bounds
             if ct < C.knotvector[0]:  # [ maxu - ( ct[0] - minu ), ct[1] ]
-                if closedC(): ct = C.knotvector[0] + ct % (C.knotvector[-1] - C.knotvector[0])
-                #if closedC(): ct = C.knotvector[-1] - (C.knotvector[0] - ct) # ct = C.knotvector[-1] - (ct - C.knotvector[0]) # NURBS book
-                else: ct = C.knotvector[0] + eps_bspline
+                if closedC():
+                    ct = C.knotvector[0] + ct % (C.knotvector[-1] - C.knotvector[0])
+                # if closedC(): ct = C.knotvector[-1] - (C.knotvector[0] - ct) # ct = C.knotvector[-1] - (ct - C.knotvector[0]) # NURBS book
+                else:
+                    ct = C.knotvector[0] + eps_bspline
 
             elif ct > C.knotvector[-1]:
-                #if closedC(): ct = C.knotvector[0] + (ct - C.knotvector[-1])
-                if closedC(): ct = C.knotvector[-1] - ct % (C.knotvector[-1] - C.knotvector[0])
-                else: ct = C.knotvector[-1] - eps_bspline
+                # if closedC(): ct = C.knotvector[0] + (ct - C.knotvector[-1])
+                if closedC():
+                    ct = C.knotvector[-1] - ct % (C.knotvector[-1] - C.knotvector[0])
+                else:
+                    ct = C.knotvector[-1] - eps_bspline
 
             c3v = np.linalg.norm(np.multiply(ct - cu, e[1]))
             if c3v < eps1:
@@ -2621,14 +1302,7 @@ def BsplineCurveExtremaDisp(C, p,
             return np.inf
         return cu
 
-    # numSamples = C.ctrlpts_size * C.degree * CSampleFactor
-    # span = (C.knotvector[-1] - C.knotvector[0]) / (numSamples - 1)
-    # kvs = np.array([C.knotvector[0] + (span * i) for i in range(0, numSamples)])
-    # pts = C.evaluate_list(kvs)
-
-    #pts, kvs = splineToPolyline(C, curveSampleFactor=delta) todo 1/C.delta?
     pts, kvs = splineToPolyline(C, curveSampleFactor=deltaFactor)
-
     # original version fails on points of equal minimal curvature
 
     # 2-part selection for global maxima using both displacement and curve inflection
@@ -2638,61 +1312,10 @@ def BsplineCurveExtremaDisp(C, p,
 
     # curvature approach fails without C2 continuity at minima/maxima?
     # not much of an issue with STEP spline limitations
-    #
-    # localDisp = [0] * len(pts)
-    # localExtremaU = []
-    #
-    # # get discrete curvature values and point displacement
-    # for i in range(1-closedC(), len(pts) - 1 + closedC()):
-    #     if (i == 0):
-    #         p0 = np.array(pts[-1])
-    #         p1 = np.array(pts[0])
-    #         p2 = np.array(pts[1])
-    #
-    #     elif (i == len(pts)-1):
-    #         p0 = np.array(pts[-2])
-    #         p1 = np.array(pts[-1])
-    #         p2 = np.array(pts[0])
-    #
-    #     else:
-    #         p0 = np.array(pts[i - 1])
-    #         p1 = np.array(pts[i])
-    #         p2 = np.array(pts[i + 1])
-    #
-    #     if i==0 or i==1 or i==len(pts)-1:
-    #         dp0 = np.linalg.norm(p0 - p)
-    #         dp1 = np.linalg.norm(p1 - p)
-    #         dp2 = np.linalg.norm(p2 - p)
-    #
-    #     if (i>1) and (i<len(pts)-1):
-    #         dp0 = dp1
-    #         dp1 = dp2
-    #         dp2 = np.linalg.norm(p2 - p)
-    #
-    #     if maxSearch:
-    #         if (dp1 >= dp2) and (dp1 >= dp0):
-    #             localExtremaU.append(kvs[i])
-    #     else:  # minS
-    #         if (dp1 <= dp2) and (dp1 <= dp0):
-    #             # where a point is orthogonal to a planar surface -> sphere radius test, or accept minima
-    #             localExtremaU.append(kvs[i])
-    #
-    #     localDisp[i] = dp1
-    #
-    #     if curvatureTest:
-    #         pur, pucc = radiusCentre3points_2(p0, p1, p2)
-    #         if (pur == np.inf):
-    #             break
-    #         else:
-    #             # p is on the same side of the surface as the mean curvature
-    #             if np.dot(p - p1, pucc - p1)/np.linalg.norm(pucc - p1) > 0:
-    #                 discreteK[i] = pur
-    #             else:
-    #                 discreteK[i] = -pur
 
     if curvatureTest:  # discrete grid summing curvatures along U and V axes
         localExtremaU = localCurvatureTest()
-    else: # localDispTest()
+    else:  # localDispTest()
         localExtremaU = localDispTest()
 
     if len(localExtremaU) == 0: return []
@@ -2715,55 +1338,45 @@ def BsplineCurveExtremaDisp(C, p,
         if not any(np.isclose(m, u, eps1).all() for u in extremaUnique):
             extremaUnique.append(m)
 
-    if (localExtrema and (len(extremaUnique) == 1)) or not localExtrema:  # if there is only one extrema, localextrema is moot
-        if uv_xyz: return extremaUnique # return single value in list for compatibility
-        else: return [np.array(C.evaluate_single(extremaUnique[0])),]
+    if (localExtrema and (
+            len(extremaUnique) == 1)) or not localExtrema:  # if there is only one extrema, localextrema is moot
+        if uv_xyz:
+            return extremaUnique  # return single value in list for compatibility
+        else:
+            return [np.array(C.evaluate_single(extremaUnique[0])), ]
     else:
         if localExtrema:
-            if uv_xyz: return extremaUnique
-            else: return C.evaluate_list(extremaUnique)
-        else: # return single maxima
+            if uv_xyz:
+                return extremaUnique
+            else:
+                return C.evaluate_list(extremaUnique)
+        else:  # return single maxima
             extremaUniquePoint = C.evaluate_list(extremaUnique)
             dispsExtrema = [np.linalg.norm(np.array(e) - p) for e in extremaUniquePoint]
-            if maxSearch: # return single value in list for compatibility
-                if uv_xyz: return [extremaUnique[dispsExtrema.index(max(dispsExtrema))],]
-                else: return [np.array(extremaUniquePoint[dispsExtrema.index(max(dispsExtrema))]),]
-            else: # minsearch
-                if uv_xyz: return [extremaUnique[dispsExtrema.index(min(dispsExtrema))],]
-                else: return [np.array(extremaUniquePoint[dispsExtrema.index(min(dispsExtrema))]),]
-
-    # if len(extremaU) == 0: #return []
-    #     # minima/maxima at curve ends
-    #     if all([localDisp[1] < ll for ll in localDisp[2:-2]]): # u = 0
-    #         if uv_xyz: return [0.,]
-    #         else: return C.evaluate_single(0.)
-    #     elif all([localDisp[-2] > ll for ll in localDisp[1:-1:-3]]): # u = 1
-    #         if uv_xyz: return [1.,]
-    #         else: return C.evaluate_single(1.)
-    #     else:
-    #         print("Bspline assumption fail")
-
-    # if (localExtrema and (len(extremaUnique) == 1)) or not localExtrema:  # if there is only one extrema, localextrema is moot
-    #     if uv_xyz: return [extremaUnique,] # return single value in list for compatibility
-    #     else: return [np.array(C.evaluate_single(extremaUnique)),]
-    # else:
-    #     if localExtrema:
-    #         if uv_xyz: return extremaUnique
-    #         else: return C.evaluate_list(extremaUnique)
-    #     else: # return single maxima
-    #         extremaUniquePoint = C.evaluate_list(extremaUnique)
-    #         dispsExtrema = [np.linalg.norm(np.array(e) - p) for e in extremaUniquePoint]
-    #         if maxSearch: # return single value in list for compatibility
-    #             if uv_xyz: return [extremaUnique[dispsExtrema.index(max(dispsExtrema))],]
-    #             else: return [np.array(extremaUniquePoint[dispsExtrema.index(max(dispsExtrema))]),]
-    #         else: # minsearch
-    #             if uv_xyz: return [extremaUnique[dispsExtrema.index(min(dispsExtrema))],]
-    #             else: return [np.array(extremaUniquePoint[dispsExtrema.index(min(dispsExtrema))]),]
-
-
-
+            if maxSearch:  # return single value in list for compatibility
+                if uv_xyz:
+                    return [extremaUnique[dispsExtrema.index(max(dispsExtrema))], ]
+                else:
+                    return [np.array(extremaUniquePoint[dispsExtrema.index(max(dispsExtrema))]), ]
+            else:  # minsearch
+                if uv_xyz:
+                    return [extremaUnique[dispsExtrema.index(min(dispsExtrema))], ]
+                else:
+                    return [np.array(extremaUniquePoint[dispsExtrema.index(min(dispsExtrema))]), ]
 
 def pointInArc(p, v1, v2, _refDir, _auxDir, _normDir, aCentreP, rotSym=True):
+    """
+    Return true if point p is within arc defined by vertex v1, v2 with centre point aCentreP
+    :param p: cartesian point
+    :param v1: STEP end arc vertex
+    :param v2: STEP end arc vertex
+    :param _refDir: reference direction vector
+    :param _auxDir: auxilliary direction vector
+    :param _normDir: normal direction vector
+    :param aCentreP: arc centre point
+    :param rotSym: bool, test whether radius is consistent for point
+    :return bool
+    """
     # (note: if VOR, reverse v1, v2 entries)
     # test if points are on arc between vertex1 & vertex2
     # convert aCentreP, p, v1 & v2 to local coordinates with arcAxisDir as z
@@ -2799,8 +1412,8 @@ def pointInArc(p, v1, v2, _refDir, _auxDir, _normDir, aCentreP, rotSym=True):
     planeTestFail = 0
     if max(zTest) - min(zTest) > eps_STEP_AP21:
         planeTestFail += 1
-        #print("pointInArc() transform error: " + str(max(zTest) - min(zTest)))
-        #raise RuntimeError("error")
+        # print("pointInArc() transform error: " + str(max(zTest) - min(zTest)))
+        # raise RuntimeError("error")
 
     # check if vertex order reversed before calling function
     if isinstance(p, list):
@@ -2819,7 +1432,7 @@ def pointInArc(p, v1, v2, _refDir, _auxDir, _normDir, aCentreP, rotSym=True):
 
     else:
         returnBool = (((pUV_angle >= v1UV_angle) and (pUV_angle <= v2UV_angle)) or
-                (v1UV_angle == v2UV_angle))
+                      (v1UV_angle == v2UV_angle))
 
         if returnBool and not planeTestFail:
             print("pointInArc() transform deviation: " + str(max(zTest) - min(zTest)))
@@ -2828,15 +1441,29 @@ def pointInArc(p, v1, v2, _refDir, _auxDir, _normDir, aCentreP, rotSym=True):
 
 
 def pointOrderInArc(p, v1, v2, _refDir, _auxDir, _normDir, aCentreP, rotSym=True):
+    """
+    Return order of a list of cartesian points around a supplied axis
+    within arc defined by vertex v1, v2 with centre point aCentreP
+    :param p: cartesian point
+    :param v1: STEP end arc vertex
+    :param v2: STEP end arc vertex
+    :param _refDir: reference direction vector
+    :param _auxDir: auxilliary direction vector
+    :param _normDir: normal direction vector
+    :param aCentreP: arc centre point
+    :param rotSym: bool, test whether radius is consistent for point
+    :return sorted index list
+    """
+
     # (note: if VOR, reverse v1, v2 entries)
     # determine the order of a list of cartesian points around a supplied axis
     # convert aCentreP, p, v1 & v2 to local coordinates with arcAxisDir as z
     # no requirement for equal radius (e.g. ellipse)
 
-    print("pointOrderInArc() undertested")
+    #print("pointOrderInArc() undertested")
 
     if not isinstance(p, list):
-        p = [p,]
+        p = [p, ]
         print("pointOrderInArc() input point(s) in list")
 
     rotM = np.array([_refDir, _auxDir, _normDir])
@@ -2872,7 +1499,6 @@ def pointOrderInArc(p, v1, v2, _refDir, _auxDir, _normDir, aCentreP, rotSym=True
         if ppUV_angle < 0: ppUV_angle += (2 * np.pi)
         pUV_angle.append(ppUV_angle % (2 * np.pi))
 
-
     # # sanity check that Z-values are identical
     # if isinstance(p, list):
     #     zTest = [pp[2] for pp in pUV]
@@ -2889,18 +1515,19 @@ def pointOrderInArc(p, v1, v2, _refDir, _auxDir, _normDir, aCentreP, rotSym=True
 
     # check if vertex order reversed before calling function
 
-    #if (v1UV_angle < v2UV_angle): ???
+    # if (v1UV_angle < v2UV_angle): ???
     withinVertex1andVertex2 = [((pUV_a >= v1UV_angle) and (pUV_a <= v2UV_angle)) for pUV_a in pUV_angle]
 
-    return withinVertex1andVertex2, np.argsort(pUV_angle), [pUV_a/(2 * np.pi) for pUV_a in pUV_angle]
+    return withinVertex1andVertex2, np.argsort(pUV_angle), [pUV_a / (2 * np.pi) for pUV_a in pUV_angle]
 
 
-def pointProjectAxis(p, axP, axN): #todo is this also projection to surface via normal?
+def pointProjectAxis(p, axP, axN):  # todo is this also projection to surface via normal?
     '''
-    project point p to axis defined by point axP and normal axN
-    p: point to project
-    axP: axis point
-    axN: axis normal vector
+    Project point p to axis defined by point axP and normal axN
+    :param p: point to project
+    :param axP: axis point
+    :param axN: axis normal vector
+    :return cartesian point
     '''
     vpp = p - axP
     vpn = axP - axN
@@ -2908,6 +1535,16 @@ def pointProjectAxis(p, axP, axN): #todo is this also projection to surface via 
 
 
 def pointCircleMinMaxDisp(p, centrePoint, normAxis, radius, interior=False):
+    '''
+    Get minima/maxima point on circle relative to point p
+    :param p: point
+    :param centrePoint: circle centre point
+    :param normAxis: circle normal axis
+    :param radius: circle radius
+    :param interior: bool, if true and point is within interior, interior poinnt is returned,
+                    otherwise nearest point on periphery
+    :return minima, maxima point
+    '''
     # Point on circle (including interior points) furthest/closest to point "p"
 
     # normAxis = auxDir / np.linalg.norm(normAxis)  # unit normal vector
@@ -2928,27 +1565,27 @@ def pointCircleMinMaxDisp(p, centrePoint, normAxis, radius, interior=False):
 
     # if point pUV, projected to circle plane, falls outside circle radius, replace with edge point.
 
-    #centreNormal = False
+    # centreNormal = False
     if np.isclose(ppCentreDisp, 0):
         # p lies on normal through circle centrePoint,
         return centrePoint, None
 
-    pUVdir = (pUV - centrePoint)/ppCentreDisp
+    pUVdir = (pUV - centrePoint) / ppCentreDisp
 
     nUVmin = centrePoint + radius * pUVdir
     nUVmax = centrePoint - radius * pUVdir
 
-    #nUVmin = centrePoint + radius / (ppCentreDisp * (pUV - centrePoint))
-    #nUVmax = centrePoint - radius / (ppCentreDisp * (pUV - centrePoint))
+    # nUVmin = centrePoint + radius / (ppCentreDisp * (pUV - centrePoint))
+    # nUVmax = centrePoint - radius / (ppCentreDisp * (pUV - centrePoint))
 
-    if ppCentreDisp >= radius: # and not interior:
+    if ppCentreDisp >= radius:  # and not interior:
         return nUVmin, nUVmax
     else:
         # if ppCentreDisp < eps_STEP_AP21:
         #     return centrePoint, centrePoint
         # else:
         centreOffset = pUV - centrePoint
-        centreOffset = centreOffset/np.linalg.norm(centreOffset)
+        centreOffset = centreOffset / np.linalg.norm(centreOffset)
         nUVmax = centrePoint - radius * centreOffset
         #
         if interior:
@@ -2959,18 +1596,32 @@ def pointCircleMinMaxDisp(p, centrePoint, normAxis, radius, interior=False):
     return nUVmin, nUVmax,
 
 
-def pointEllipseMinMaxDisp( p,
-                            eCentre,
-                            eLocalXaxis,
-                            eLocalYaxis,
-                            eNormalAxis,
-                            eMajorRadius,
-                            eMinorRadius,
-                            interior=False):
-    # Robert Nurnberg method, see http://wwwf.imperial.ac.uk/~rn/distance2ellipse.pdf
-    # Move origin to ellipse centre, and rotate point coordinate to local coordinates
-    # based on ellipse major & minor axis.
-    # Assuming direction_ratios of AXIS2_PLACEMENT_3D are normalised
+def pointEllipseMinMaxDisp(p,
+                           eCentre,
+                           eLocalXaxis,
+                           eLocalYaxis,
+                           eNormalAxis,
+                           eMajorRadius,
+                           eMinorRadius,
+                           interior=False):
+    '''
+    Get minima/maxima point on ellipse relative to point p
+    Robert Nurnberg method, see http://wwwf.imperial.ac.uk/~rn/distance2ellipse.pdf
+    Move origin to ellipse centre, and rotate point coordinate to local coordinates
+    based on ellipse major & minor axis.
+    Assuming direction_ratios of AXIS2_PLACEMENT_3D are normalised
+
+    :param p: point
+    :param eCentre: ellipse centre point
+    :param eLocalXaxis: ellipse major axis
+    :param eLocalYaxis: ellipse minor axis
+    :param eNormalAxis: ellipse normal axis
+    :param eMajorRadius: ellipse major radius
+    :param eMinorRadius: ellipse minor radius
+    :param interior: bool, if true and point is within interior, interior poinnt is returned,
+                    otherwise nearest point on periphery
+    :return minima, maxima point
+    '''
 
     # eFeatureAxis = arrayTypeCast(eFeatureAxis)
     # eLocalXYaxis = arrayTypeCast(eLocalXYaxis)
@@ -2984,7 +1635,7 @@ def pointEllipseMinMaxDisp( p,
     pUV = np.matmul(rotM, p - eCentre)
 
     if np.linalg.norm(p - eCentre) < eps:
-        print("should be 2x maxima/minima, write some code") # todo: ellipse dual min/max
+        print("should be 2x maxima/minima, write some code")  # todo: ellipse dual min/max
         # maxima will be +/- eMajorRadius points along major axis
         # minima +/- eMinorRadius points on minor axis
 
@@ -2994,21 +1645,21 @@ def pointEllipseMinMaxDisp( p,
     theta = np.arctan2(eMajorRadius * pUV[1], eMinorRadius * pUV[0])
     i = 0
     n0 = pUV
-    radiusConst = eMajorRadius**2 - eMinorRadius**2
+    radiusConst = eMajorRadius ** 2 - eMinorRadius ** 2
     pUVdisp = np.linalg.norm(pUV)
 
     while i < 100:
         i += 1
         f = (
-            radiusConst * np.cos(theta) * np.sin(theta)
-            - pUV[0] * eMajorRadius * np.sin(theta)
-            + pUV[1] * eMinorRadius * np.cos(theta)
+                radiusConst * np.cos(theta) * np.sin(theta)
+                - pUV[0] * eMajorRadius * np.sin(theta)
+                + pUV[1] * eMinorRadius * np.cos(theta)
         )
 
         f_ = (
-            radiusConst * (np.cos(theta) ** 2 - np.sin(theta) ** 2)
-            - pUV[0] * eMajorRadius * np.cos(theta)
-            - pUV[1] * eMinorRadius * np.sin(theta)
+                radiusConst * (np.cos(theta) ** 2 - np.sin(theta) ** 2)
+                - pUV[0] * eMajorRadius * np.cos(theta)
+                - pUV[1] * eMinorRadius * np.sin(theta)
         )
 
         theta = theta - f / f_
@@ -3032,8 +1683,6 @@ def pointEllipseMinMaxDisp( p,
     #     nUVmin = centrePoint + radius * centreOffset
 
     return nUVmin, nUVmax
-
-# print('p = Draft.make_point( {:1.8f}, {:1.8f}, {:1.8f})'.format(xyz[0], xyz[0], xyz[2]))
 
 
 def intersectSegmentPlane(vertex0,
@@ -3059,31 +1708,35 @@ def intersectSegmentPlane(vertex0,
             return vertex0 + np.dot(s, F)  # point intersects segment
         else:
             return None  # intersection beyond segment
-    return None  #   segment is parallel to plane
+    return None  # segment is parallel to plane
 
 
 def intersectPlaneCircle(pPoint, pNorm, cPoint, cNorm, cRadius, tol=eps_STEP_AP21):
-    """Cintersection of a plane and a circle.
-    plane point
-    plane norm
-    circle point
-    circle norm
-    circle radius
-
-    There are 4 cases of plane-circle intersection:
+    '''
+    Get intersection of a plane and a circle
+    4 cases of plane-circle intersection:
 
     1. intersect in 2 points (secant),
     2. intersect in 1 point (tangent),
     3. do not intersect, or
     4. coincide (circle.plane == plane).
-    """
+
+    :param pPoint: plane point
+    :param pNorm: plane norm
+    :param cPoint: circle point
+    :param cNorm: circle norm
+    :param cRadius: circle radius
+    :param tol:
+    :return segment vertexes
+    '''
+
     if np.abs(np.dot(pNorm, cNorm)) >= 1 - tol:
         return None
 
     d = np.cross(pNorm, cNorm)  # direction of intersection line
     # vector in plane 1 perpendicular to the direction of the intersection line
     v1 = np.cross(d, pNorm)
-    p1 = pPoint + v1    # point on plane 1
+    p1 = pPoint + v1  # point on plane 1
     L = p1 - pPoint
     cosl = np.dot(cNorm, L)
     if np.abs(cosl) <= tol:
@@ -3098,20 +1751,20 @@ def intersectPlaneCircle(pPoint, pNorm, cPoint, cNorm, cRadius, tol=eps_STEP_AP2
 
     a = (l2[0] - l1[0]) ** 2 + (l2[1] - l1[1]) ** 2 + (l2[2] - l1[2]) ** 2
     b = 2.0 * (
-        (l2[0] - l1[0]) * (l1[0] - cPoint[0]) +
-        (l2[1] - l1[1]) * (l1[1] - cPoint[1]) + (
-                l2[2] - l1[2]) * (l1[2] - cPoint[2])
+            (l2[0] - l1[0]) * (l1[0] - cPoint[0]) +
+            (l2[1] - l1[1]) * (l1[1] - cPoint[1]) + (
+                    l2[2] - l1[2]) * (l1[2] - cPoint[2])
     )
 
     c = (
-        cPoint[0] ** 2
-        + sPoint[1] ** 2
-        + sPoint[2] ** 2
-        + l1[0] ** 2
-        + l1[1] ** 2
-        + l1[2] ** 2
-        - 2.0 * (cPoint[0] * l1[0] + cPoint[1] * l1[1] + cPoint[2] * l1[2])
-        - cRadius**2
+            cPoint[0] ** 2
+            + cPoint[1] ** 2
+            + cPoint[2] ** 2
+            + l1[0] ** 2
+            + l1[1] ** 2
+            + l1[2] ** 2
+            - 2.0 * (cPoint[0] * l1[0] + cPoint[1] * l1[1] + cPoint[2] * l1[2])
+            - cRadius ** 2
     )
 
     i = b * b - 4.0 * a * c
@@ -3143,15 +1796,29 @@ def intersectPlaneCircle(pPoint, pNorm, cPoint, cNorm, cRadius, tol=eps_STEP_AP2
         return [ipt1, ipt2]
 
 
-def intersectArcPlane( planeNormal,
-                        planePoint,
-                        arcCentrePoint,
-                        arcRefDir,
-                        arcAuxDir,
-                        arcNormal,
-                        arcRadius,
-                        arcVertex1,
-                        arcVertex2):
+def intersectArcPlane(planeNormal,
+                      planePoint,
+                      arcCentrePoint,
+                      arcRefDir,
+                      arcAuxDir,
+                      arcNormal,
+                      arcRadius,
+                      arcVertex1,
+                      arcVertex2):
+    '''
+    Get intersection segnemt between arc and plane,
+
+    :param planeNormal:
+    :param planePoint:
+    :param arcCentrePoint:
+    :param arcRefDir:
+    :param arcAuxDir:
+    :param arcNormal:
+    :param arcRadius:
+    :param arcVertex1:
+    :param arcVertex2:
+    :return intersection segment vertexes
+    '''
 
     # planePoint = centroidProjAxisPoint for most calls
 
@@ -3163,7 +1830,7 @@ def intersectArcPlane( planeNormal,
     if circleIntersectPoints is None:
         return []
     if len(circleIntersectPoints) == 0:
-        return [] # no intersection
+        return []  # no intersection
     if len(circleIntersectPoints) == 1:
         print("tangent exception")
         pass
@@ -3177,18 +1844,27 @@ def intersectArcPlane( planeNormal,
 
 
 def pointSegmentMinDisp(p, s0, s1):
-    #   https://web.archive.org/web/20220121145748/http://geomalgorithms.com/index.html
-    # final two boolean values indicate whether point is at or beyond endpoints of segments
+    '''
+    Get point on segment at minimum from point p.
+    https://web.archive.org/web/20220121145748/http://geomalgorithms.com/index.html
+    Final two boolean values indicate whether point is at or beyond endpoints of segments
+
+    :param p: point
+    :param s0: segment vertex 1
+    :param s1: segment vertex 2
+    :return point, bool, bool
+    '''
+
     v = s1 - s0
     w = p - s0
 
     c1 = np.dot(w, v)
-    if ( c1 <= 0 ):
-      return s0, np.linalg.norm(w), True, False
+    if (c1 <= 0):
+        return s0, np.linalg.norm(w), True, False
 
     c2 = np.dot(v, v)
-    if ( c2 <= c1 ):
-      return s1, np.linalg.norm(p - s1), False, True
+    if (c2 <= c1):
+        return s1, np.linalg.norm(p - s1), False, True
 
     b = c1 / c2
     pb = s0 + b * v
@@ -3468,11 +2144,27 @@ def pointSegmentMinDisp(p, s0, s1):
 #     minPoint = minPointIntersect[disp.index(minDisp)]
 #     return minPoint, minDisp
 
+def STEPlabelOffset(i, refStrList):
+    '''account for missing text label string in early STEP versions'''
+    if isinstance(refStrList[0], str):
+        if refStrList[0]:
+            if refStrList[0][0] == '#':
+                return i - 1
+            else:
+                return i
+        else:
+            return i
+    else:
+        return i - 1
+
 
 def cleanSubRefs(refStr):
-    """
-    flatten parameter sets and extract #d string references
-    """
+    '''
+    Flatten parameter sets and extract #d string references from stepcode parser
+    :param refSt:
+    :return list of reference strings
+    '''
+
     flattenList = (
         lambda irregularL: [e for i in irregularL for e in flattenList(i)]
         if type(irregularL) is list
@@ -3486,13 +2178,22 @@ def cleanSubRefs(refStr):
 
 
 def curveEnclosingRectangle(v1, v2, centreP, normV, radius):
+    '''
+    Get dimensions of box encompassing specified arc
+    :param v1: vertex 1
+    :param v2: vertex 2
+    :param centreP: arc centre point
+    :param normV: arc normal vector
+    :param radius: rac radius
+    :return list of box corners
+    '''
     # in order to establish union of partial ellipse/circle, create box encompassing circle/ellipse
     # in the case of ellipse, use eMajorRadius
     # vertex midpoint
-    midP = (v2 + v1)/2
+    midP = (v2 + v1) / 2
     midPv = np.cross(v2 - v1, normV)
     # midpoint - centroid vector, falls apart if coincident with centre point
-    #midPv = midP - centreP
+    # midPv = midP - centreP
     midPv = midPv / np.linalg.norm(midPv)
     farP = centreP + midPv * radius
     orthoPv = np.cross(normV, midPv)
@@ -3505,45 +2206,122 @@ def curveEnclosingRectangle(v1, v2, centreP, normV, radius):
 
 
 def CP2point(STEPobject, pointRefString):
-    """
-    return np.array of STEP AP21 CARTESIAN_POINT, DIRECTION, VECTOR
-    """
+    '''
+    Return np.array of STEP AP21 CARTESIAN_POINT, DIRECTION, VECTOR
+
+    :param STEPobject: object containing STEP data
+    :param pointRefString: STEP reference string
+    :return np.array of STEP AP21 [CARTESIAN_POINT, DIRECTION, VECTOR]
+    '''
+
     # assert STEPobject[ref2index(pointRefString)].type_name == "CARTESIAN_POINT"
-    #R3 = STEPobject[ref2index(pointRefString)].params[1]
+    # R3 = STEPobject[ref2index(pointRefString)].params[1]
     R3 = STEPobject[ref2index(pointRefString)].params[-1]
     return np.array([R3[0], R3[1], R3[2]])
 
 
+# def axis2Placement3D(strRef, STEPobj):
+#     '''
+#     Process STEP AXIS2_PLACEMENT_3D entity
+#     axis: the Direction that defines the second axis of the Axis_placement. (Y or V, not normal)
+#     ref_direction: the direction used to determine the direction of the local X axis. (or U)
+#
+#     :param STEPobject: object containing STEP data
+#     :param strRef: STEP reference string
+#     :return axisPoint, auxDir, refDir
+#     '''
+#     # process STEP AXIS2_PLACEMENT_3D entity
+#     assert STEPobj[ref2index(strRef)].type_name == 'AXIS2_PLACEMENT_3D'
+#     # D = {}
+#
+#     if '#' in STEPobj[ref2index(strRef)].params[0]:  # check for name string
+#         # not a robust approach as certain values are optional
+#         offset = 0
+#     else:
+#         offset = 1
+#
+#     axisPoint = STEPobj[ref2index(strRef)].params[offset]
+#     assert STEPobj[ref2index(axisPoint)].type_name == 'CARTESIAN_POINT'
+#     axisPoint = CP2point(STEPobj, axisPoint)
+#     # D['axisPoint'] = axisPoint
+#
+#     auxDir = STEP_entities[ref2index(strRef)].params[offset + 1]
+#     assert STEP_entities[ref2index(auxDir)].type_name == 'DIRECTION'
+#     auxDir = CP2point(STEP_entities, auxDir)
+#     # D['auxDir'] = auxDir
+#
+#     refDir = STEP_entities[ref2index(strRef)].params[offset + 2]
+#     assert STEP_entities[ref2index(refDir)].type_name == 'DIRECTION'
+#     refDir = CP2point(STEP_entities, refDir)
+#     # D['refDir'] = refDir
+#
+#     return axisPoint, auxDir, refDir
+
+
+# search for cartesian points & check if points correspond with referenced curve/edge vertexes
+
+# TRIMMED_CURVE
+# ENTITY trimmed_curve
+# SUBTYPE OF (bounded_curve);
+# basis_curve : curve;
+# trim_1 : SET[1:2] OF trimming_select;
+# trim_2 : SET[1:2] OF trimming_select;
+# sense_agreement : BOOLEAN;
+# master_representation : trimming_preference;
+
+# provides either parametric, point or angle end points to arc
+# can be used to update vertex1/2
+
+
+
+def axis1Placement(strRef, STEPobj):
+    '''
+    Process STEP AXIS1_PLACEMENT entity
+    axis: the direction of the axis.
+
+    :param STEPobj: object containing STEP data
+    :param strRef: STEP reference string
+    :return axisPoint, normDir, refDir
+    '''
+    # STEP ISO 10303-42 notes, EXPRESS descriptor
+    # ENTITY Axis1_placement
+    #   SUBTYPE OF (Axis_placement);
+    #   axis : OPTIONAL Direction;
+
+    # Attribute definitions:
+    # axis: the direction of the axis.
+    # The dimensionality of the Axis_placement_2d shall be 3.
+    # The number of dimension ratios of the axis shall be 3.
+
+    if STEPobj[ref2index(strRef)].type_name != 'AXIS1_PLACEMENT':
+        print("axis2Placement3D assignment failure: " + STEPobj[ref2index(strRef)].type_name)
+        return None
+
+    axisPoint = None
+    normDir = None
+    subRefList = cleanSubRefs(STEPobj[ref2index(strRef)].params)
+
+    if (STEPobj[ref2index(subRefList[0])].type_name == 'CARTESIAN_POINT'):
+        axisPoint = CP2point(STEPobj, subRefList[0])
+
+        if len(subRefList) > 1:
+            if (STEPobj[ref2index(subRefList[1])].type_name == 'DIRECTION'):
+                normDir = CP2point(STEPobj, subRefList[1])
+
+    return axisPoint, normDir
+
+
 def axis2Placement3D(strRef, STEPobj):
-    # process STEP AXIS2_PLACEMENT_3D entity
-    assert STEPobj[ref2index(strRef)].type_name == 'AXIS2_PLACEMENT_3D'
-    # D = {}
+    '''
+    Process STEP AXIS2_PLACEMENT_3D entity
+    axis: the Direction that defines the second axis of the Axis_placement. (Y or V, not normal)
+    ref_direction: the direction used to determine the direction of the local X axis. (or U)
 
-    if '#' in STEPobj[ref2index(strRef)].params[0]:  # check for name string
-        # not a robust approach as certain values are optional
-        offset = 0
-    else:
-        offset = 1
-
-    axisPoint = STEPobj[ref2index(strRef)].params[offset]
-    assert STEPobj[ref2index(axisPoint)].type_name == 'CARTESIAN_POINT'
-    axisPoint = CP2point(STEPobj, axisPoint)
-    # D['axisPoint'] = axisPoint
-
-    auxDir = STEP_entities[ref2index(strRef)].params[offset+1]
-    assert STEP_entities[ref2index(auxDir)].type_name == 'DIRECTION'
-    auxDir = CP2point(STEP_entities, auxDir)
-    # D['auxDir'] = auxDir
-
-    refDir = STEP_entities[ref2index(strRef)].params[offset+2]
-    assert STEP_entities[ref2index(refDir)].type_name == 'DIRECTION'
-    refDir = CP2point(STEP_entities, refDir)
-    # D['refDir'] = refDir
-
-    return axisPoint, auxDir, refDir
-
-
-def axis2Placement3D_2(strRef, STEPobj):
+    :param STEPobj: object containing STEP data
+    :param strRef: STEP reference string
+    :return
+    '''
+    # STEP ISO 10303-42 notes, EXPRESS descriptor
     # process STEP AXIS2_PLACEMENT_3D entity
     # axis: the Direction that defines the second axis of the Axis_placement. (Y or V, not normal)
     # The value of this attribute need not be specified.
@@ -3553,7 +2331,7 @@ def axis2Placement3D_2(strRef, STEPobj):
     # If both axis and ref_direction are provided then the vector product of axis and ref_direction shall not be a null vector.
 
     if STEPobj[ref2index(strRef)].type_name != 'AXIS2_PLACEMENT_3D':
-        print("axis2Placement3D_2 assignment failure: " + STEPobj[ref2index(strRef)].type_name)
+        print("axis2Placement3D assignment failure: " + STEPobj[ref2index(strRef)].type_name)
         return None
 
     axisPoint = None
@@ -3607,6 +2385,12 @@ def axis2Placement3D_2(strRef, STEPobj):
 
 
 def splineToPolyline(c, curveSampleFactor=2):
+    '''
+    Get set of sampled points from geomdl spline curve object
+    :param c: geomdl curve object
+    :param curveSampleFactor:
+    :return cartesian points, parametric values
+    '''
     numSamples = c.ctrlpts_size * c.degree * curveSampleFactor
     span = (c.knotvector[-1] - c.knotvector[0]) / (numSamples - 1)
     kvs = np.array([c.knotvector[0] + (span * i) for i in range(0, numSamples)])
@@ -3615,9 +2399,17 @@ def splineToPolyline(c, curveSampleFactor=2):
 
 
 def insideOutsideSurfaceTest(localCentroid, mPoint, AFSdata):
-    # project ray from localCentroid toward mPoint in order to determine whether this ray intersects the surface defined in AFS
-    # the angle of edge vertices of an intercepted face are calculated with respect to this point and summed
-    # return true if point within surface edges ("Angle Sum Algorithm")
+    '''
+    Project ray from localCentroid toward mPoint in order to determine whether this ray intersects the surface defined in AFS
+    The angle of edge vertices of an intercepted face are calculated with respect to this point and summed
+    Return true if point within surface edges ("Angle Sum Algorithm")
+    No accommodation for holes in surface
+    :param AFSdata: parsed surfaces data object
+    :param localCentroid: estimated surface median point based on extrema points identified
+    :param mPoint:
+    :return bool True if within surface
+    '''
+
 
     def vertexAngle(mPoint, v1, v2):
         # project vertex points to a plane defined by mPoint and sNorm
@@ -3632,13 +2424,13 @@ def insideOutsideSurfaceTest(localCentroid, mPoint, AFSdata):
 
         sign = np.sign(np.cross(mppv1, mppv2).dot(sNorm))
 
-        v1v2cos = np.dot(mppv1, mppv2) / (np.linalg.norm(mppv1) * np.linalg.norm(mppv2)) # cosine
+        v1v2cos = np.dot(mppv1, mppv2) / (np.linalg.norm(mppv1) * np.linalg.norm(mppv2))  # cosine
 
         if np.abs(v1v2cos) < eps_STEP_AP21:
             print("insideOutsideSurfaceTest(): edge warning")
 
         # zero value implies mPoint lies on edge
-        return(sign * np.arccos(np.clip(v1v2cos, -1, 1)))
+        return (sign * np.arccos(np.clip(v1v2cos, -1, 1)))
 
     sNormDen = np.linalg.norm(mPoint - localCentroid)
     if sNormDen > eps_STEP_AP21:
@@ -3647,8 +2439,8 @@ def insideOutsideSurfaceTest(localCentroid, mPoint, AFSdata):
         # point is at localCentroid, find normal from provided surface parameters
         print("insideOutsideSurfaceTest(): median localCentroid at surface, surface normal substituted")
         # add offset to everything and try again?
-        # mirror mPoint around surface normal? just use surface normal instead? -> requires earlier calc of axis2Placement3D_2
-        #_1=1
+        # mirror mPoint around surface normal? just use surface normal instead? -> requires earlier calc of axis2Placement3D
+        # _1=1
         sNorm = AFSdata['ParsedSurface']['normDir']
 
     edgeTotalAngle = 0
@@ -3674,20 +2466,34 @@ def insideOutsideSurfaceTest(localCentroid, mPoint, AFSdata):
 
                 # if mPoint[0]==0: # and mPoint[1]== -0.30397087 and mPoint[2]==-16.61759168:
                 #     _1=1
-                nearestSplinePointU = BsplineCurveExtremaDisp(edge['BsplineKnotCurve'], mPoint, maxSearch=False, uv_xyz=True)
-                nearestSplinePoint = np.array(edge['BsplineKnotCurve'].evaluate_list(nearestSplinePointU))
+                nearestSplinePointU = BsplineCurveExtremaDisp(edge['BsplineKnotCurve'],
+                                                              mPoint,
+                                                              maxSearch=False,
+                                                              uv_xyz=True)
+
+                if len(nearestSplinePointU) == 0: # usually means mPoint is closest to endpoints
+                    #
+                    if np.linalg.norm(mPoint - v1) <= np.linalg.norm(mPoint - v2):
+                        nearestSplinePoint = v1
+                        nearestSplinePointU = 0.
+                    else:
+                        nearestSplinePoint = v2
+                        nearestSplinePointU = 1.
+                else:
+                    nearestSplinePoint = np.array(edge['BsplineKnotCurve'].evaluate_list(nearestSplinePointU))
 
                 if np.linalg.norm(mPoint - nearestSplinePoint) < eps_STEP_AP21:
                     print('insideOutsideSurfaceTest(): spline edge warning - ignore polyline warnings')
                 if not any([np.isclose(nearestSplinePointU, splU) for splU in splinePolylineU]):
                     # has to be ordered correctly
-                    splinePolylineU = np.insert(splinePolylineU,splinePolylineU.searchsorted(nearestSplinePointU),nearestSplinePointU)
+                    splinePolylineU = np.insert(splinePolylineU, splinePolylineU.searchsorted(nearestSplinePointU),
+                                                nearestSplinePointU)
                     iu = np.argmin(np.abs(splinePolylineU - nearestSplinePointU))
                     splinePolyline = [np.array(spl) for spl in splinePolyline]
                     splinePolyline = np.insert(splinePolyline, iu, nearestSplinePoint, axis=0)
-                for i in range(len(splinePolyline)-1):
-                    edgeTotalAngle += vertexAngle(mPoint, splinePolyline[i], splinePolyline[i+1])
-                #_1=1
+                for i in range(len(splinePolyline) - 1):
+                    edgeTotalAngle += vertexAngle(mPoint, splinePolyline[i], splinePolyline[i + 1])
+                # _1=1
 
         # account for circle or ellipse arcs, find nearest point on arc to mPoint,
         # add a point there, effectively converting arc into two segments
@@ -3696,9 +2502,9 @@ def insideOutsideSurfaceTest(localCentroid, mPoint, AFSdata):
                 vertexLoopCount += 1  # should be discarded if point is not within loop?
             else:
                 nearArcPoint, _ = pointCircleMinMaxDisp(mPoint,
-                                                       edge['axisPoint'],
-                                                       edge['normDir'],
-                                                       edge['radius'])
+                                                        edge['axisPoint'],
+                                                        edge['normDir'],
+                                                        edge['radius'])
                 if pointInArc(nearArcPoint,
                               v1, v2,
                               edge['refDir'],
@@ -3715,13 +2521,13 @@ def insideOutsideSurfaceTest(localCentroid, mPoint, AFSdata):
                 vertexLoopCount += 1  # should be discarded if point is not within loop?
             else:
                 nearArcPoint, _ = pointEllipseMinMaxDisp(mPoint,
-                                       edge['axisPoint'],
-                                       edge['refDir'],
-                                       edge['auxDir'],
-                                       edge['normDir'],
-                                       edge['majorRadius'],
-                                       edge['minorRadius'],
-                                       interior=False)
+                                                         edge['axisPoint'],
+                                                         edge['refDir'],
+                                                         edge['auxDir'],
+                                                         edge['normDir'],
+                                                         edge['majorRadius'],
+                                                         edge['minorRadius'],
+                                                         interior=False)
                 if pointInArc(nearArcPoint,
                               v1, v2,
                               edge['refDir'],
@@ -3737,13 +2543,13 @@ def insideOutsideSurfaceTest(localCentroid, mPoint, AFSdata):
             # project vertex points to a plane defined by mPoint and sNorm
             edgeTotalAngle += vertexAngle(mPoint, v1, v2)
 
-
     # surfaces that curve > 90deg can give false negative, assume inside/outside test is to detect nearest surface
 
     # exception for cylinder, conic, sphere
-    if (AFS['SurfaceTypeName'] in ['CYLINDRICAL_SURFACE',]) or (AFS['SurfaceTypeName'] in ['CONICAL_SURFACE',]):
+    if (AFS['SurfaceTypeName'] in ['CYLINDRICAL_SURFACE', ]) or (AFS['SurfaceTypeName'] in ['CONICAL_SURFACE', ]):
         # edges angle sum to zero from 2x loops and seam edge ---------------------needs testing
-        if (np.abs(edgeTotalAngle % (2 * np.pi)) < eps_STEP_AP21) and (vertexLoopCount >= 1): # (len(AFSdata['outerBoundEdgeLoop']) < 4):
+        if (np.abs(edgeTotalAngle % (2 * np.pi)) < eps_STEP_AP21) and (
+                vertexLoopCount >= 1):  # (len(AFSdata['outerBoundEdgeLoop']) < 4):
             # only need to determine whether point lies within section of cone axis within cone as circle or ellipse loops at ends signify
             #   fully enclosed surface
             # vertex angles that sum to zero will still indicate a crossing, for either CW, or ACW direction configuration
@@ -3778,7 +2584,7 @@ def insideOutsideSurfaceTest(localCentroid, mPoint, AFSdata):
 
                     # define plane through axisPoint, mPoint, normDir
                     axisPoint = np.array(AFSdata['ParsedSurface']['axisPoint'])
-                    #normDir = np.array(AFSdata['ParsedSurface']['normDir'])
+                    # normDir = np.array(AFSdata['ParsedSurface']['normDir'])
                     planeNorm = np.cross((mPoint - axisPoint), normDir)
                     orthoPlane = np.cross(planeNorm, normDir)
                     mSign = np.dot(axisPoint - mPoint, orthoPlane) > 0
@@ -3786,9 +2592,9 @@ def insideOutsideSurfaceTest(localCentroid, mPoint, AFSdata):
                     nearArcPointSet = []
                     U = []
 
-                    for i in range(0, len(sPolyline)-1):
+                    for i in range(0, len(sPolyline) - 1):
                         nearArcPoint = intersectSegmentPlane(np.array(sPolyline[i]),
-                                                             np.array(sPolyline[i+1]),
+                                                             np.array(sPolyline[i + 1]),
                                                              planeNorm,
                                                              mPoint)
                         if nearArcPoint is not None:
@@ -3806,20 +2612,20 @@ def insideOutsideSurfaceTest(localCentroid, mPoint, AFSdata):
                         for i_naps, naps in enumerate(nearArcPointSet):
                             napsSign = np.dot(axisPoint - naps, orthoPlane) > 0
                             if napsSign == mSign:
-                            #if np.isclose(np.cross(mPoint - naps, normDir), np.array([0., 0., 0.]), eps_STEP_AP21).all():
+                                # if np.isclose(np.cross(mPoint - naps, normDir), np.array([0., 0., 0.]), eps_STEP_AP21).all():
                                 nearArcPoint = naps
                                 iu = U[i_naps]
 
                     # binary search over u-interval
-                    if iu+1 > len(sPolylineU):
-                        _1=1
-                    hiU = sPolylineU[iu+1]
-                    hiP = sPolyline[iu+1]
+                    if iu + 1 > len(sPolylineU):
+                        _1 = 1
+                    hiU = sPolylineU[iu + 1]
+                    hiP = sPolyline[iu + 1]
                     loU = sPolylineU[iu]
                     loP = sPolyline[iu]
 
-                    while (hiU-loU) > eps_STEP_AP21: #1E-10: #==================================================
-                        midU = loU + (hiU - loU)/2
+                    while (hiU - loU) > eps_STEP_AP21:  # 1E-10: #==================================================
+                        midU = loU + (hiU - loU) / 2
                         midP = np.array(edge['BsplineKnotCurve'].evaluate_single(midU))
                         nearArcPoint = intersectSegmentPlane(loP, midP, planeNorm, mPoint)
                         if nearArcPoint is not None:
@@ -3828,8 +2634,8 @@ def insideOutsideSurfaceTest(localCentroid, mPoint, AFSdata):
                         else:
                             nearArcPoint = intersectSegmentPlane(midP, hiP, planeNorm, mPoint)
                             if nearArcPoint is not None:
-                                loP=midP
-                                loU=midU
+                                loP = midP
+                                loU = midU
                             else:
                                 print("fail")
 
@@ -3840,7 +2646,7 @@ def insideOutsideSurfaceTest(localCentroid, mPoint, AFSdata):
                 print(curvedEdgeNearestPoint)
                 print(mPoint)
             if len(curvedEdgeNearestPoint) < 2:
-                #print("insideOutsideSurfaceTest cylinder/conical fail")
+                # print("insideOutsideSurfaceTest cylinder/conical fail")
                 return False
             # project intersections to plane where axis is normal (normDir), through mPoint
             # if all points have same sign, all are on same side
@@ -3848,8 +2654,6 @@ def insideOutsideSurfaceTest(localCentroid, mPoint, AFSdata):
                 return True
             else:
                 return False
-
-
 
     # if AFS['SurfaceTypeName'] in ['CONICAL_SURFACE',]:
     #     # edges angle sum to zero from 2x loops and seam edge ---------------------needs testing
@@ -3859,10 +2663,10 @@ def insideOutsideSurfaceTest(localCentroid, mPoint, AFSdata):
     #     else:
     #         return False
 
-    if AFS['SurfaceTypeName'] in ['PLANE', ]: # full circle
+    if AFS['SurfaceTypeName'] in ['PLANE', ]:  # full circle
         if (np.abs(edgeTotalAngle) < eps_STEP_AP21) and (len(AFSdata['outerBoundEdgeLoop']) < 2):
             return True
-        elif ((np.abs(edgeTotalAngle) % (2*np.pi)) < eps_STEP_AP21) and (len(AFSdata['outerBoundEdgeLoop']) > 1):
+        elif ((np.abs(edgeTotalAngle) % (2 * np.pi)) < eps_STEP_AP21) and (len(AFSdata['outerBoundEdgeLoop']) > 1):
             return True
         else:
             return False
@@ -3870,7 +2674,7 @@ def insideOutsideSurfaceTest(localCentroid, mPoint, AFSdata):
     # may have to take VOR into account depending on orientation of surface,
     # e.g. concave or convex spherical surface
     # assume that minima point is always closest to centroid?
-    #if not edge['VOR']:
+    # if not edge['VOR']:
     if not AFSdata['SurfaceNormalOutwards']:
         if (edgeTotalAngle % (2 * np.pi)) < eps_STEP_AP21 and (edgeTotalAngle > 0):
             return True
@@ -3884,18 +2688,28 @@ def insideOutsideSurfaceTest(localCentroid, mPoint, AFSdata):
 
 
 def segmentParse(localCentroid, ParsedEdge, STEP_entities_):
+    '''
+    Parse STEP segment representation
+
+    :param STEP_entities_: object containing STEP data
+    :param ParsedEdge: : parsed edge data object
+    :param localCentroid: estimated surface median point based on extrema points identified
+    :return
+    '''
+
+    # STEP ISO 10303-42 notes, EXPRESS descriptor
     # ENTITY Line
     #   SUBTYPE OF (Curve);
     #   point : Cartesian_point;
     #   line_direction : Direction;
 
-    # if ParsedEdge.get('subEdgeType') is not None:
-    #     edgeType_ = ParsedEdge['subEdgeType']
+    # if ParsedEdge.get('subedgeParams') is not None:
+    #     edgeParams_ = ParsedEdge['subEdgeParams']
     # else:
-    edgeType_ = ParsedEdge['edgeType']
+    edgeParams_ = ParsedEdge['edgeParams']
 
-    cleanEdgeType = cleanSubRefs(edgeType_)
-    for cet in cleanEdgeType:
+    cleanEdgeParams = cleanSubRefs(edgeParams_)
+    for cet in cleanEdgeParams:
         if (STEP_entities_[ref2index(cet)].type_name == 'CARTESIAN_POINT'):
             linePoint = CP2point(STEP_entities_, cet)
             ParsedEdge['linePoint'] = linePoint
@@ -3908,27 +2722,42 @@ def segmentParse(localCentroid, ParsedEdge, STEP_entities_):
                 lineVectorDir = CP2point(STEP_entities_, lineVectorDir)
                 ParsedEdge['lineVectorDir'] = lineVectorDir
 
-    minPoint, minPointCentroidDisp, v1ext, v2ext = pointSegmentMinDisp(localCentroid, ParsedEdge['vertex1'], ParsedEdge['vertex2'])
+    minPoint, minPointCentroidDisp, v1ext, v2ext = pointSegmentMinDisp(localCentroid, ParsedEdge['vertex1'],
+                                                                       ParsedEdge['vertex2'])
     # todo, if there are multiple minima, return list? store minpoint as list?
 
     if not v1ext and not v2ext:
         ParsedEdge['pointFeature']['xyz'].insert(1, minPoint)
         ParsedEdge['pointFeature']['centroidDisp'].insert(1, minPointCentroidDisp)
-        u = np.linalg.norm(minPoint - ParsedEdge['vertex1'])/np.linalg.norm(ParsedEdge['vertex2'] - ParsedEdge['vertex1'])
+        u = np.linalg.norm(minPoint - ParsedEdge['vertex1']) / np.linalg.norm(
+            ParsedEdge['vertex2'] - ParsedEdge['vertex1'])
         ParsedEdge['pointFeature']['u'].insert(1, u)
 
 
 def circleParse(localCentroid, ParsedEdge, STEP_entities_):
+    '''
+    Parse STEP circle representation
 
-    # if ParsedEdge.get('subEdgeType') is not None:
-    #     edgeType_ = ParsedEdge['subEdgeType']
+    :param STEP_entities_: object containing STEP data
+    :param ParsedEdge: : parsed edge data object
+    :param localCentroid: estimated surface median point based on extrema points identified
+    :return
+    '''
+
+    # STEP ISO 10303-42 notes
+    # axis: the Direction that defines the second axis of the Axis_placement. The value of this attribute need not be specified.
+    # ref_direction: the direction used to determine the direction of the local X axis.
+    # The value of this attribute need not be specified. If axis or ref_direction is omitted, these directions are taken from the geometric coordinate system
+
+    # if ParsedEdge.get('subEdgeParams') is not None:
+    #     edgeParams_ = ParsedEdge['subEdgeParams']
     # else:
-    edgeType_ = ParsedEdge['edgeType']
+    edgeParams_ = ParsedEdge['edgeParams']
 
-    radius = edgeType_[-1]
+    radius = edgeParams_[-1]
     ParsedEdge['radius'] = radius
 
-    axisPoint, normDir, refDir = axis2Placement3D_2(edgeType_[-2], STEP_entities_)
+    axisPoint, normDir, refDir = axis2Placement3D(edgeParams_[-2], STEP_entities_)
     ParsedEdge['axisPoint'] = axisPoint
     ParsedEdge['normDir'] = normDir
     ParsedEdge['refDir'] = refDir
@@ -3938,10 +2767,10 @@ def circleParse(localCentroid, ParsedEdge, STEP_entities_):
     ParsedEdge['auxDir'] = auxDir
 
     # test if cylinder is rotationally symmetrical, if localCentroid is close to axisDir through axisPoint
-    #rotSymDisp = np.linalg.norm((localCentroid - axisPoint) - np.dot((localCentroid - axisPoint), normDir) * normDir)
+    # rotSymDisp = np.linalg.norm((localCentroid - axisPoint) - np.dot((localCentroid - axisPoint), normDir) * normDir)
 
     # why doesn't the below work?-------------------------------------------------------------------------
-    #rotSymDisp = np.linalg.norm(localCentroid - pointProjectAxis(localCentroid, axisPoint, normDir))
+    # rotSymDisp = np.linalg.norm(localCentroid - pointProjectAxis(localCentroid, axisPoint, normDir))
 
     # # project localCentroid to disc plane
     # # distance d of point p to the plane is dot product of plane unit normal, normAxis
@@ -3964,13 +2793,13 @@ def circleParse(localCentroid, ParsedEdge, STEP_entities_):
     )
 
     v1 = ParsedEdge['vertex1']
-    v2 = ParsedEdge['vertex2'] # v1 always equals v2 for full circle
-    #ParsedEdge['minPoint'] = minPoint
+    v2 = ParsedEdge['vertex2']  # v1 always equals v2 for full circle
+    # ParsedEdge['minPoint'] = minPoint
 
     extrema = []
     if maxPoint is not None: extrema.append(np.array(maxPoint))
     if minPoint is not None: extrema.append(np.array(minPoint))
-    #extrema = [maxPoint, minPoint]
+    # extrema = [maxPoint, minPoint]
     pointsInArc, pointOrderIndex, uArc = pointOrderInArc(extrema, v1, v2, refDir, auxDir, normDir, axisPoint)
     pointsInArc = [pointsInArc[poi] for poi in pointOrderIndex]
     extrema = [extrema[poi] for poi in pointOrderIndex]
@@ -3984,7 +2813,7 @@ def circleParse(localCentroid, ParsedEdge, STEP_entities_):
             if not any([np.isclose(uArc[ex_i], uu) for uu in ParsedEdge['pointFeature']['u']]):
                 ParsedEdge['pointFeature']['xyz'].insert(-1, ex)
                 ParsedEdge['pointFeature']['centroidDisp'].insert(-1, np.linalg.norm(ex - localCentroid))
-                ParsedEdge['pointFeature']['u'].insert(-1, uArc[ex_i]) # check u proximity?
+                ParsedEdge['pointFeature']['u'].insert(-1, uArc[ex_i])  # check u proximity?
 
     # centroid orthogonal to centrePoint
     if rotSymDisp < eps_STEP_AP21:
@@ -3994,26 +2823,40 @@ def circleParse(localCentroid, ParsedEdge, STEP_entities_):
         ParsedEdge['rotSymFeature'] = dict()
         ParsedEdge['rotSymFeature']['rotSymCentre'] = axisPoint
         ParsedEdge['rotSymFeature']['rotSymRadius'] = radius
-        ParsedEdge['rotSymFeature']['radiusCentroidDisp'] = np.sqrt(radius ** 2 + np.linalg.norm(axisPoint - localCentroid) ** 2)
+        ParsedEdge['rotSymFeature']['radiusCentroidDisp'] = np.sqrt(
+            radius ** 2 + np.linalg.norm(axisPoint - localCentroid) ** 2)
 
 
 def ellipseParse(localCentroid, ParsedEdge, STEP_entities_):
+    '''
+    Parse STEP ellipse representation
+
+    :param STEP_entities_: object containing STEP data
+    :param ParsedEdge: : parsed edge data object
+    :param localCentroid: estimated surface median point based on extrema points identified
+    :return
+    '''
+
+    # STEP ISO 10303-42 notes
+    # axis: the Direction that defines the second axis of the Axis_placement. The value of this attribute need not be specified.
+    # ref_direction: the direction used to determine the direction of the local X axis.
+    # The value of this attribute need not be specified. If axis or ref_direction is omitted, these directions are taken from the geometric coordinate system
+
     # first_semi_axis: half the length of the first diameter of the Ellipse.
     # second_semi_axis: half the length of the second diameter of the Ellipse.
 
-    # if ParsedEdge.get('subEdgeType') is not None:
-    #     edgeType_ = ParsedEdge['subEdgeType']
+    # if ParsedEdge.get('subEdgeParams') is not None:
+    #     edgeParams_ = ParsedEdge['subEdgeParams']
     # else:
-    edgeType_ = ParsedEdge['edgeType']
+    edgeParams = ParsedEdge['edgeParams']
 
-    cleanEdgeType = cleanSubRefs(edgeType_)
-    majorRadius = cleanEdgeType[-2]
+    majorRadius = edgeParams[-2]
     ParsedEdge['majorRadius'] = majorRadius
 
-    minorRadius = cleanEdgeType[-1]
+    minorRadius = edgeParams[-1]
     ParsedEdge['minorRadius'] = minorRadius
 
-    axisPoint, normDir, refDir = axis2Placement3D_2(edgeType_[-2], STEP_entities_)
+    axisPoint, normDir, refDir = axis2Placement3D(edgeParams[-3], STEP_entities_)
     ParsedEdge['axisPoint'] = axisPoint
     ParsedEdge['normDir'] = normDir
     ParsedEdge['refDir'] = refDir
@@ -4056,104 +2899,345 @@ def ellipseParse(localCentroid, ParsedEdge, STEP_entities_):
         if not np.isclose(v1, ex).all() and not np.isclose(v2, ex).all():
             ParsedEdge['pointFeature']['xyz'].insert(-1, ex)
             ParsedEdge['pointFeature']['centroidDisp'].insert(-1, np.linalg.norm(ex - localCentroid))
-            ParsedEdge['pointFeature']['u'] .insert(-1, uArc[ex_i]) # check u proximity?
+            ParsedEdge['pointFeature']['u'].insert(-1, uArc[ex_i])  # check u proximity?
 
 
 
-    # if pointInArc(minPoint, v1, v2, refDir, auxDir, normDir, axisPoint, rotSym=False):
-    #     ParsedEdge['minPoint'] = minPoint
-    #     ParsedEdge['vertexExtremaMin'] = False
-    # else:  # one of the vertices is a minima
-    #     ParsedEdge['vertexExtremaMin'] = True
-    #     if ParsedEdge['vertex1centroidDisp'] < ParsedEdge['vertex2centroidDisp']:
-    #         ParsedEdge['minPoint'] = ParsedEdge['vertex1']
-    #         ParsedEdge['minPointCentroidDisp'] = ParsedEdge['vertex1centroidDisp']
-    #     else:
-    #         ParsedEdge['minPoint'] = ParsedEdge['vertex2']
-    #         ParsedEdge['minPointCentroidDisp'] = ParsedEdge['vertex2centroidDisp']
-    #
-    # if pointInArc(maxPoint, v1, v2, refDir, auxDir, normDir, axisPoint, rotSym=True):
-    #     ParsedEdge['maxPoint'] = maxPoint
-    #     ParsedEdge['vertexExtremaMax'] = False
-    # else:  # one of the vertices is a maxima
-    #     ParsedEdge['vertexExtremaMax'] = True
-    #     if ParsedEdge['vertex1centroidDisp'] > ParsedEdge['vertex2centroidDisp']:
-    #         ParsedEdge['maxPoint'] = ParsedEdge['vertex1']
-    #         ParsedEdge['maxPointCentroidDisp'] = ParsedEdge['vertex1centroidDisp']
-    #     else:
-    #         ParsedEdge['maxPoint'] = ParsedEdge['vertex2']
-    #         ParsedEdge['maxPointCentroidDisp'] = ParsedEdge['vertex2centroidDisp']
-
-    # if ParsedEdge['vertex1ref'] == ParsedEdge['vertex2ref']:  # full ellipse? untested
-    #     if np.linalg.norm(minPoint - v1) < eps_STEP_AP21:
-    #         ParsedEdge['vertex1extremaMin'] = True
-    #         ParsedEdge['vertex2extremaMin'] = True
-    #         ParsedEdge['vertex1extremaMax'] = False
-    #         ParsedEdge['vertex2extremaMax'] = False
-    #     if np.linalg.norm(maxPoint - v1) < eps_STEP_AP21:
-    #         ParsedEdge['vertex1extremaMin'] = False
-    #         ParsedEdge['vertex2extremaMin'] = False
-    #         ParsedEdge['vertex1extremaMax'] = True
-    #         ParsedEdge['vertex2extremaMax'] = True
-    #
-    # else:  # partial ellipse arc
-    #     if pointInArc(minPoint, v1, v2, refDir, auxDir, normDir, axisPoint, rotSym=True):
-    #         ParsedEdge['minPoint'] = minPoint
-    #         ParsedEdge['minPointCentroidDisp'] = np.linalg.norm(minPoint - localCentroid)
-    #         if np.linalg.norm(minPoint - v1) < eps_STEP_AP21:
-    #             ParsedEdge['vertex1extremaMin'] = True
-    #             ParsedEdge['vertex2extremaMin'] = False
-    #         if np.linalg.norm(minPoint - v2) < eps_STEP_AP21:
-    #             ParsedEdge['vertex1extremaMin'] = False
-    #             ParsedEdge['vertex2extremaMin'] = True
-    #
-    #     if pointInArc(maxPoint, v1, v2, refDir, auxDir, normDir, axisPoint, rotSym=True):
-    #         ParsedEdge['maxPoint'] = maxPoint
-    #         ParsedEdge['maxPointCentroidDisp'] = np.linalg.norm(maxPoint - localCentroid)
-    #         if np.linalg.norm(maxPoint - v1) < eps_STEP_AP21:
-    #             ParsedEdge['vertex1extremaMax'] = True
-    #             ParsedEdge['vertex2extremaMax'] = False
-    #         if np.linalg.norm(maxPoint - v2) < eps_STEP_AP21:
-    #             ParsedEdge['vertex1extremaMax'] = False
-    #             ParsedEdge['vertex2extremaMax'] = True
+def boundedCurve(localCentroid, complexEntityList, STEP_entities_):
+    pass
 
 
-        # if pointInArc(minPoint, v1, v2, refDir, auxDir, normDir, axisPoint, rotSym=True):
-        #     ParsedEdge['minPoint'] = minPoint
-        #     ParsedEdge['minPointCentroidDisp'] = np.linalg.norm(minPoint - centroid)
-        #     ParsedEdge['vertex1extremaMin'] = False
-        #     ParsedEdge['vertex2extremaMin'] = False
-        # else:  # one of the vertices is a minima (only valid for straight line)
-        #     if ParsedEdge['vertex1centroidDisp'] < ParsedEdge['vertex2centroidDisp']:
-        #         ParsedEdge['minPoint'] = ParsedEdge['vertex1']
-        #         ParsedEdge['minPointCentroidDisp'] = ParsedEdge['vertex1centroidDisp']
-        #         ParsedEdge['vertex1extremaMin'] = True
-        #         ParsedEdge['vertex2extremaMin'] = False
-        #     else:
-        #         ParsedEdge['minPoint'] = ParsedEdge['vertex2']
-        #         ParsedEdge['minPointCentroidDisp'] = ParsedEdge['vertex2centroidDisp']
-        #         ParsedEdge['vertex1extremaMin'] = False
-        #         ParsedEdge['vertex2extremaMin'] = True
-        #
-        # if pointInArc(maxPoint, v1, v2, refDir, auxDir, normDir, axisPoint, rotSym=True):
-        #     ParsedEdge['maxPoint'] = maxPoint
-        #     ParsedEdge['maxPointCentroidDisp'] = np.linalg.norm(maxPoint - centroid)
-        #     ParsedEdge['vertex1extremaMax'] = True
-        #     ParsedEdge['vertex2extremaMax'] = True
-        # else:  # one of the vertices is a maxima (only valid for straight line)
-        #     if ParsedEdge['vertex1centroidDisp'] > ParsedEdge['vertex2centroidDisp']:
-        #         ParsedEdge['maxPoint'] = ParsedEdge['vertex1']
-        #         ParsedEdge['maxPointCentroidDisp'] = ParsedEdge['vertex1centroidDisp']
-        #         ParsedEdge['vertex1extremaMax'] = True
-        #         ParsedEdge['vertex2extremaMax'] = False
-        #     else:
-        #         ParsedEdge['maxPoint'] = ParsedEdge['vertex2']
-        #         ParsedEdge['maxPointCentroidDisp'] = ParsedEdge['vertex2centroidDisp']
-        #         ParsedEdge['vertex1extremaMax'] = False
-        #         ParsedEdge['vertex2extremaMax'] = True
+# def complexEntityParse(complexEntityRef, STEP_entities):
+#     typeNameList = [cel.type_name for cel in STEP_entities[complexEntityRef].params]
+#     if typeNameList[0] == 'BOUNDED_SURFACE':
+#         boundedSurface(np.array([0.,0.,0.]), ref2index(se2), STEP_entities)
+#
+#         SurfaceClass['SurfaceTypeName'] = 'BOUNDED_SURFACE'
+#         # NOTE    A surface, such as a cylinder or sphere, closed in one, or two, parametric directions is not a bounded surface.
+#         #             SurfaceClass = {
+#         #                 'SurfaceNormalOutwards': SurfaceNormalOutwards,
+#         #                 'SurfaceTypeName': None,
+#         #                 'SurfaceRef': None,
+#         #                 'SurfaceParams': None,
+#         #                 'EdgeLoopList': [],
+#         #             }
+#         #                         SurfaceClass['SurfaceTypeName'] = afTypeName
+#         #                         SurfaceClass['SurfaceRef'] = se2
+#         #                         SurfaceClass['SurfaceParams'] = STEP_entities[
+#         #                             ref2index(se2)
+#         #                         ].params
+
+
+def boundedSurface(AFS, localCentroid, STEP_entities_, minimaExtrema=False):
+
+    # ENTITY bounded_surface
+    # SUPERTYPE OF (ONEOF(b_spline_surface, rectangular_trimmed_surface, curve_bounded_surface, rectangular_composite_surface))
+    # SUBTYPE OF (surface);
+
+    #  assume provision of a list containing elements of rational weighted B spline, a complex entity
+    #assert(STEP_entities[complexEntityList].params[0].type_name == 'BOUNDED_SURFACE')
+
+    # test whether AFS instance is simply a list where Bounded_Surface is the first reference,
+    # or whether the list is AFS['SurfaceRef']
+
+    if isinstance(AFS, list):
+        complexEntity = AFS
+    elif isinstance(AFS, dict):
+        complexEntity = STEP_entities[ref2index(AFS['SurfaceRef'])].params
+    else:
+        print('unknown complex entity formulation')
+
+    typeNameList = [cel.type_name for cel in complexEntity]
+
+    # ENTITY
+
+    # SUPERTYPE OF (ONEOF(b_spline_surface, rectangular_trimmed_surface, curve_bounded_surface, rectangular_composite_surface))
+    # SUBTYPE OF (surface)
+    if typeNameList[0] != 'BOUNDED_SURFACE':
+        print(" BoundedSurface type error")
+        return
+
+    if ('B_SPLINE_SURFACE' not in typeNameList) or \
+            ('B_SPLINE_SURFACE_WITH_KNOTS' not in typeNameList) or \
+            ('RATIONAL_B_SPLINE_SURFACE' not in typeNameList):
+        print(" unhandled complex entity")
+
+    ParsedSurface = {}
+
+    if 'B_SPLINE_SURFACE' in typeNameList:
+        fieldRef = typeNameList.index('B_SPLINE_SURFACE')
+
+        # ENTITY b_spline_surface
+        # SUPERTYPE OF (ONEOF(b_spline_surface_with_knots, uniform_surface, quasi_uniform_surface, bezier_surface)
+        # ANDOR rational_b_spline_surface)
+        # SUBTYPE OF (bounded_surface);
+        # u_degree : INTEGER;
+        # v_degree : INTEGER;
+        # control_points_list : LIST [2:?] OF LIST [2:?] OF cartesian_point;
+        # surface_form : b_spline_surface_form;
+        # u_closed : LOGICAL;
+        # v_closed : LOGICAL;
+        # self_intersect : LOGICAL;
+        # DERIVE
+        # u_upper : INTEGER := SIZEOF(control_points_list) - 1;
+        # v_upper : INTEGER := SIZEOF(control_points_list[1]) - 1;
+        # control_points : ARRAY [0:u_upper] OF ARRAY [0:v_upper] OF
+        # cartesian_point := make_array_of_array(control_points_list,0,u_upper,0,v_upper);
+        # WHERE
+        # WR1: (’GEOMETRY_SCHEMA.UNIFORM_SURFACE’ IN TYPEOF(SELF)) OR
+        # (’GEOMETRY_SCHEMA.QUASI_UNIFORM_SURFACE’ IN TYPEOF(SELF)) OR
+        # (’GEOMETRY_SCHEMA.BEZIER_SURFACE’ IN TYPEOF(SELF)) OR
+        # (’GEOMETRY_SCHEMA.B_SPLINE_SURFACE_WITH_KNOTS’ IN TYPEOF(SELF));
+        # get cartesian point references for eventual spline calculation
+        BsplineSurfaceRefs = complexEntity[fieldRef].params
+
+        ParsedSurface['surfaceUdegree'] = BsplineSurfaceRefs[0]
+        ParsedSurface['surfaceVdegree'] = BsplineSurfaceRefs[1]
+        ParsedSurface['controlPointsRefs'] = BsplineSurfaceRefs[2]
+
+        # ParsedSurface['u_upper'] = len(ParsedSurface['controlPointsRefs']) - 1
+        # ParsedSurface['v_upper'] = len(ParsedSurface['controlPointsRefs'][0]) - 1
+
+        # controPointsListRefs structured as U control points length list of V control points length list
+
+        controlPointsLenU = len(ParsedSurface['controlPointsRefs'])
+        controlPointsLenV = len(ParsedSurface['controlPointsRefs'][0])
+
+        # control_points_list : LIST [2:?] OF LIST [2:?] OF cartesian_point;
+        controlPoints = []
+        for cplU in ParsedSurface['controlPointsRefs']:
+            for cplV in cplU:
+                if (STEP_entities[ref2index(cplV)].type_name == 'CARTESIAN_POINT'):
+                    controlPoints.append(CP2point(STEP_entities, cleanSubRefs(cplV)[0]))
+
+        ParsedSurface['controlPoints'] = controlPoints
+        ParsedSurface['surfaceForm'] = BsplineSurfaceRefs[3]
+        ParsedSurface['closedU'] = 'T' in BsplineSurfaceRefs[4]
+        ParsedSurface['closedV'] = 'T' in BsplineSurfaceRefs[5]
+        ParsedSurface['selfIntersect'] = BsplineSurfaceRefs[6] # '.U.' ???
+
+    if 'B_SPLINE_SURFACE_WITH_KNOTS' in typeNameList:
+        fieldRef = typeNameList.index('B_SPLINE_SURFACE_WITH_KNOTS')
+
+        BsplineSurfaceWithKnotsRefs = complexEntity[fieldRef].params
+        ParsedSurface['knotUmultiplicities'] = BsplineSurfaceWithKnotsRefs[0]
+        ParsedSurface['knotVmultiplicities'] = BsplineSurfaceWithKnotsRefs[1]
+        ParsedSurface['knotsU'] = BsplineSurfaceWithKnotsRefs[2]
+        ParsedSurface['knotsV'] = BsplineSurfaceWithKnotsRefs[3]
+        ParsedSurface['knotSpec'] = BsplineSurfaceWithKnotsRefs[4]
+
+    if 'RATIONAL_B_SPLINE_SURFACE' in typeNameList:
+        fieldRef = typeNameList.index('RATIONAL_B_SPLINE_SURFACE')
+
+        ParsedSurface['weightSpec'] = complexEntity[fieldRef].params[0]
+        surfaceWeights = [item for sublist in ParsedSurface['weightSpec'] for item in sublist]
+
+    # construct full U & V knotvectors
+    STEPknotUvector = []
+    for kml in range(len(ParsedSurface['knotUmultiplicities'])):
+        for i in range(ParsedSurface['knotUmultiplicities'][kml]):
+            STEPknotUvector.append(ParsedSurface['knotsU'][kml])
+    ParsedSurface['STEPknotUvector'] = STEPknotUvector
+
+    if (len(STEPknotUvector) - controlPointsLenU - ParsedSurface['surfaceUdegree']) != 1:
+        print("maldefined B-spline surface (U) !")
+
+    # p.106 https://quaoar.su/files/standards/Standard%20-%202003%20-%20ISO%2010303-42.pdf
+
+    STEPknotVvector = []
+    for kml in range(len(ParsedSurface['knotVmultiplicities'])):
+        for i in range(ParsedSurface['knotVmultiplicities'][kml]):
+            STEPknotVvector.append(ParsedSurface['knotsV'][kml])
+    ParsedSurface['STEPknotVvector'] = STEPknotVvector
+
+    # note _knotXvector values not used as Piegel+Tiller algorithms don't always work with explicit knots
+
+    if (len(STEPknotVvector) - controlPointsLenV - ParsedSurface['surfaceVdegree']) != 1:
+        print("maldefined B-spline surface (V) !")
+
+    # BsplineKnotSurface = BSpline.Surface(normalize_kv=True)
+    BsplineKnotSurface = NURBS.Surface()
+    BsplineKnotSurface.degree_u = ParsedSurface['surfaceUdegree']
+    BsplineKnotSurface.degree_v = ParsedSurface['surfaceVdegree']
+
+    BsplineKnotSurface.ctrlpts_size_u = controlPointsLenU
+    BsplineKnotSurface.ctrlpts_size_v = controlPointsLenV
+
+    ctrlptsw = compatibility.combine_ctrlpts_weights(controlPoints, weights=surfaceWeights)
+    BsplineKnotSurface.set_ctrlpts(ctrlptsw, controlPointsLenU, controlPointsLenV)
+
+    # BsplineKnotSurface.ctrlpts2d = controlPoints
+    # BsplineKnotSurface.knotvector_u = STEPknotUvector
+    # BsplineKnotSurface.knotvector_v = STEPknotVvector
+
+    BsplineKnotSurface.knotvector_u = utilities.generate_knot_vector(ParsedSurface['surfaceUdegree'],
+                                                                     controlPointsLenU)
+    BsplineKnotSurface.knotvector_v = utilities.generate_knot_vector(ParsedSurface['surfaceVdegree'],
+                                                                     controlPointsLenV)
+
+    ParsedSurface['BsplineKnotCurve'] = BsplineKnotSurface
+
+    # No compelling reason to set evaluation delta & evaluate surface points as evaluation seems incorrect
+    # BsplineKnotSurface.delta = 0.025  # this seems to be the minima delta under adaptive tesselation
+    # BsplineKnotSurface.evaluate()
+
+    if not minimaExtrema:
+        AFS['ParsedSurface'] = ParsedSurface
+        return
+
+    # local minima/maxima
+    maxPointsUV = rationalSurfaceExtremaParam_5(BsplineKnotSurface,
+                                                localCentroid,
+                                                maxSearch=True,
+                                                localExtrema=True,
+                                                curvatureTest=False,
+                                                uv_xyz=True)
+
+    maxPoints = BsplineKnotSurface.evaluate_list(maxPointsUV)
+
+    minPointsUV = rationalSurfaceExtremaParam_5(BsplineKnotSurface,
+                                                localCentroid,
+                                                maxSearch=False,
+                                                localExtrema=True,
+                                                curvatureTest=False,
+                                                uv_xyz=True)
+
+    minPoints = BsplineKnotSurface.evaluate_list(minPointsUV)
+
+    # normalise u,v to [0, 1] - not required with geomdl generated knot vectors
+    # knotUrange = STEPknotUvector[-1] - STEPknotUvector[0]
+    # knotVrange = STEPknotVvector[-1] - STEPknotVvector[0]
+    # maxPointsUV = [((mpu[0] - STEPknotUvector[0])/knotUrange, (mpu[1] - STEPknotVvector[0])/knotVrange ) for mpu in maxPointsUV]
+    # minPointsUV = [((mpu[0] - STEPknotUvector[0])/knotUrange, (mpu[1] - STEPknotVvector[0])/knotVrange ) for mpu in minPointsUV]
+
+    maxima = [True, ] * len(maxPoints) + [False, ] * len(minPoints)
+    minima = [False, ] * len(maxPoints) + [True, ] * len(minPoints)
+
+    maximaUV = np.array(maxPointsUV + minPointsUV)
+    maximaPoints = np.array(maxPoints + minPoints)
+    if len(maximaPoints) > 1:
+        # create explicit dtype fields to permit sorting via u, then v
+        maximaUV_field = maximaUV.ravel().view(dtype=[('u', maximaUV.dtype), ('v', maximaUV.dtype)])
+        extremaUVindex = np.argsort(maximaUV_field, order=('u', 'v'))
+        maximaUV = [maximaUV[euvi] for euvi in extremaUVindex]
+        maximaPoints = [maximaPoints[euvi] for euvi in extremaUVindex]
+        maxima = [maxima[euvi] for euvi in extremaUVindex]
+        minima = [minima[euvi] for euvi in extremaUVindex]
+
+        # because Newton-Raphson will converge on a tangent, separate max/min values may be identical
+        maxima_truth = [np.allclose(maximaUV[mu + 1], maximaUV[mu], eps_STEP_AP21) for mu in
+                        range(0, len(maximaUV) - 1)]
+        maxima_truth = maxima_truth + [False, ]
+        maximaUV = [mu for (mu, mt) in zip(maximaUV, maxima_truth) if not mt]
+        maximaPoints = [mp for (mp, mt) in zip(maximaPoints, maxima_truth) if not mt]
+
+    ParsedSurface['pointFeature']['xyz'] = maximaPoints
+    ParsedSurface['pointFeature']['uv'] = maximaUV
+    ParsedSurface['pointFeature']['centroidDisp'] = [np.linalg.norm(mp - localCentroid) for mp in maximaPoints]
+    ParsedSurface['pointFeature']['maxima'] = maxima
+    ParsedSurface['pointFeature']['minima'] = minima
+
+    # detect rotationally symmetric spline surfaces, spline surface cylinder
+    # get the median point of rings/arcs of control points
+    spinePoints = np.array([np.array(s).mean(axis=0) for s in BsplineKnotSurface.ctrlpts2d])
+
+    # test for deviation from mean point
+    rowDelta = []
+    for s in range(0, len(spinePoints) - 1):
+        ctrlptsRowDisp = [np.linalg.norm(spinePoints[s] - sc) for sc in BsplineKnotSurface.ctrlpts2d[s]]
+        rowDelta.append(max(ctrlptsRowDisp) - min(ctrlptsRowDisp))
+
+    # low rowDelta values suggest rotational symmetry,
+    # similar rowDelta values suggest consistent cross-section (with possible helicity):
+    # consistentCrossSection = np.array(rowDelta).var()
+    # should show up with edge maxima/minima
+
+    # spinePointDisps = [np.linalg.norm(spinePoints[s] - BsplineKnotSurface.ctrlpts2d[s]) for s in range(0, len(BsplineKnotSurface.ctrlpts2d))]
+    spinePointsMean = spinePoints.mean(axis=0)
+    uu, dd, vv = np.linalg.svd(spinePoints - spinePointsMean)
+
+    # vv[0] contains the first principal component, i.e. the direction
+    # vector of the 'best fit' line in the least squares sense.
+    # project mean control point rows to derived PCA spine and assess spine axis straightness
+    spineDir = vv[0] - spinePointsMean
+    spinePointDir = [s - spinePointsMean for s in spinePoints]
+    spineIP = np.dot(spineDir, spineDir)
+    projSpinePointDir = [np.dot(s, spineDir) / spineIP for s in spinePointDir]
+
+    projSpinePoint = [spinePointsMean + pspd * spineDir for pspd in projSpinePointDir]
+    # test for centroid disp from spine axis, giving minima rotation
+
+    spineDeviations = [np.linalg.norm(projSpinePoint[n] - spinePoints[n]) for n in range(0, len(spinePoints - 1))]
+
+    if (max(rowDelta) < eps_STEP_AP21) and (
+            max(spineDeviations) < eps_STEP_AP21):  # rotSymLimit constant --------------------------------------------
+        # ParsedSurface['rotSymFlag'] = 1
+        ParsedSurface['rotSymFeature'] = dict()
+        # ParsedSurface['rotSymFeature']['rotSymCentre'] = ?? centroid minima within
+        ParsedSurface['rotSymFeature']['rotSymRadius'] = spinePointsMean
+
+    AFS['ParsedSurface'] = ParsedSurface
+
+
+def trimmedCurveParse(ParsedEdge, STEP_entities):
+    pass
+    # )
+    # ENTITY trimmed_curve
+    # SUBTYPE OF (bounded_curve);
+    # basis_curve : curve;
+    # trim_1 : SET[1:2] OF trimming_select;
+    # trim_2 : SET[1:2] OF trimming_select;
+    # sense_agreement : BOOLEAN;
+    # master_representation : trimming_preference;
+    # WHERE
+    # WR1: (HIINDEX(trim_1) = 1) OR (TYPEOF(trim_1[1]) <> TYPEOF(trim_1[2]));
+    # WR2: (HIINDEX(trim_2) = 1) OR (TYPEOF(trim_2[1]) <> TYPEOF(trim_2[2]));
+
+    # ['#1951', [180.0], [360.0], '.T.', '.UNSPECIFIED.']
+    # first value: reference to curve
+    # TRIMMED_CURVE('',#17,(#22,PARAMETER_VALUE(0.)),(#23, PARAMETER_VALUE(6.28318530718)),.T.,.PARAMETER.)
+    # TRIMMED_CURVE('',#17,(#96,PARAMETER_VALUE(1.570796326795)),(#97, PARAMETER_VALUE(7.853981633974)),.T.,.PARAMETER.)
+    # TRIMMED_CURVE('',#89,(#93,PARAMETER_VALUE(0.)),(#94, PARAMETER_VALUE(10.)), .T.,.PARAMETER.)
+    # TRIMMED_CURVE(#2197,(0.0),(1.0),.T.,.UNSPECIFIED.);
+
+    # :
+    # basis_curve: The curve to be trimmed. For curves with multiple representations any parameter values
+    # given as trim_1 or trim_2 refer to the master representation of the basis_curve only.
+    # trim_1: The first trimming point which may be specified as a cartesian point (point_1), as a real parameter value (parameter_1 = t1), or both.
+    # c ISO 2003 — All rights reserved 69
+    # ISO 10303-42:2003
+    # trim_2: The second trimming point which may be specified as a cartesian point (point_2), as a real
+    # parameter value (parameter_2 = t2 ), or both.
+    # sense_agreement: Flag to indicate whether the direction of the trimmed curve agrees with or is opposed
+    # to the direction of basis_curve.
+    # — sense agreement = TRUE if the curve is being traversed in the direction of increasing parametric
+    # value;
+    # — sense agreement = FALSE otherwise. For an open curve, sense agreement = FALSE if t1 > t2. If
+    # t2 > t1, sense agreement = TRUE. The sense information is redundant in this case but is essential
+    # for a closed curve.
+    # master_representation: Where both parameter and point are present at either end of the curve this
+    # indicates the preferred form. Multiple representations provide the ability to communicate data in more
+    # than one form, even though the data are expected to be geometrically identical. (See 4.3.9.)
+    # NOTE 3 The master_representation attribute acknowledges the impracticality of ensuring that multiple forms
+    # are indeed identical and allows the indication of a preferred form. This would probably be determined by the
+    # creator of the data. All characteristics, such as parametrisation, domain, and results of evaluation, for an entity
+    # having multiple representations, are derived from the master representation. Any use of the other representations
+    # is a compromise for practical considerations.
+
+
 
 
 def BsplineCurveWithKnotsParse(localCentroid, ParsedEdge, STEP_entities_):
+    '''
+    Parse STEP BsplineCurveWithKnotsParse representation
+
+    :param STEP_entities_: object containing STEP data
+    :param ParsedEdge: : parsed edge data object
+    :param localCentroid: estimated surface median point based on extrema points identified
+    :return
+    '''
+
+    # STEP ISO 10303-42 notes, EXPRESS descriptor
     # ENTITY B_Spline_Curve
     # 	SUPERTYPE OF ((ONEOF (Uniform_Curve, B_Spline_Curve_With_Knots, Quasi_Uniform_Curve, Bezier_Curve) ANDOR Rational_B_Spline_Curve))
     # 	SUBTYPE OF (Bounded_Curve);
@@ -4168,23 +3252,23 @@ def BsplineCurveWithKnotsParse(localCentroid, ParsedEdge, STEP_entities_):
     # 	knots : LIST [2:?] OF Parameter_Value;
     # 	knot_spec : Knot_Type;
 
-    # if ParsedEdge.get('subEdgeType') is not None:
-    #     edgeType_ = ParsedEdge['subEdgeType']
+    # if ParsedEdge.get('subEdgeParams') is not None:
+    #     edgeParams_ = ParsedEdge['subEdgeParams']
     # else:
-    edgeType = ParsedEdge['edgeType']
+    edgeParams = ParsedEdge['edgeParams']
 
-    if type(edgeType[0]) == str:  # check for name string
+    if type(edgeParams[0]) == str:  # check for name string
         offset = 1
     else:
         offset = 0
-    curveDegree = edgeType[offset]
-    controlPointsRefs = edgeType[offset + 1]
-    curveForm = edgeType[offset + 2]
-    closedCurve = 'T' in edgeType[offset + 3]
-    selfIntersect = 'T' in edgeType[offset + 4]
-    knotMultiplicities = edgeType[offset + 5]
-    knots = edgeType[offset + 6]
-    knotSpec = edgeType[offset + 7]
+    curveDegree = edgeParams[offset]
+    controlPointsRefs = edgeParams[offset + 1]
+    curveForm = edgeParams[offset + 2]
+    closedCurve = 'T' in edgeParams[offset + 3]
+    selfIntersect = 'T' in edgeParams[offset + 4]
+    knotMultiplicities = edgeParams[offset + 5]
+    knots = edgeParams[offset + 6]
+    knotSpec = edgeParams[offset + 7]
 
     ParsedEdge['curveDegree'] = curveDegree
     ParsedEdge['controlPointsRefs'] = controlPointsRefs
@@ -4247,7 +3331,7 @@ def BsplineCurveWithKnotsParse(localCentroid, ParsedEdge, STEP_entities_):
 
     # Auto-generate knot vector
     BsplineKnotCurve.knotvector = utilities.generate_knot_vector(BsplineKnotCurve.degree, len(BsplineKnotCurve.ctrlpts))
-    #BsplineKnotCurve.evaluate()
+    # BsplineKnotCurve.evaluate()
 
     ParsedEdge['BsplineKnotCurve'] = BsplineKnotCurve
 
@@ -4335,7 +3419,7 @@ def BsplineCurveWithKnotsParse(localCentroid, ParsedEdge, STEP_entities_):
     #     // movable anyway. See #issue 0003176: Sketcher: always over-constrained when referencing
     #     // external B-Spline
 
-# https://git.dev.opencascade.org/gitweb/?p=occt.git;a=blob;f=src/BSplCLib/BSplCLib.cxx;h=1414f5008b3b2a79583a0af67e0a05fcd52569cb;hb=HEAD
+    # https://git.dev.opencascade.org/gitweb/?p=occt.git;a=blob;f=src/BSplCLib/BSplCLib.cxx;h=1414f5008b3b2a79583a0af67e0a05fcd52569cb;hb=HEAD
     # 1917   // index is the first pole of the current curve for insertion schema
     # 1918
     # 1919   if (Periodic) index = -Mults(Mults.Lower());
@@ -4346,38 +3430,38 @@ def BsplineCurveWithKnotsParse(localCentroid, ParsedEdge, STEP_entities_):
     # 1924   firstmult = 0;  // multiplicity of the first-last knot for periodic
 
     maxPointsU = BsplineCurveExtremaDisp(BsplineKnotCurve,
-                                        localCentroid,
-                                        localExtrema=True,
-                                        #curvatureTest=True,
-                                        maxSearch=True,
-                                        uv_xyz=True)
+                                         localCentroid,
+                                         localExtrema=True,
+                                         # curvatureTest=True,
+                                         maxSearch=True,
+                                         uv_xyz=True)
 
     maxPoints = BsplineKnotCurve.evaluate_list(maxPointsU)
 
     minPointsU = BsplineCurveExtremaDisp(BsplineKnotCurve,
                                          localCentroid,
                                          localExtrema=True,
-                                         #curvatureTest=True,
+                                         # curvatureTest=True,
                                          maxSearch=False,
                                          uv_xyz=True)
 
     minPoints = BsplineKnotCurve.evaluate_list(minPointsU)
 
     # normalise u to [0, 1] - unrequired where normalize_kv=True
-    #knotRange = _knotvector[-1] - _knotvector[0]
-    #maxPointsU = [(mpu - _knotvector[0])/knotRange for mpu in maxPointsU]
-    #minPointsU = [(mpu - _knotvector[0])/knotRange for mpu in minPointsU]
+    # knotRange = _knotvector[-1] - _knotvector[0]
+    # maxPointsU = [(mpu - _knotvector[0])/knotRange for mpu in maxPointsU]
+    # minPointsU = [(mpu - _knotvector[0])/knotRange for mpu in minPointsU]
 
     maximaU = maxPointsU + minPointsU
     maximaPoints = maxPoints + minPoints
-    if len(maximaPoints) > 1:
+    if len(maximaPoints) > 0:
         extremaUindex = np.argsort(maximaU)
         maximaU = [maximaU[eui] for eui in extremaUindex]
         maximaPoints = [maximaPoints[eui] for eui in extremaUindex]
 
         # because Newton-Raphson will converge on a tangent, separate max/min values may be identical
-        maxima_truth = [(maximaU[mu + 1] - maximaU[mu]) > eps_STEP_AP21 for mu in range(0, len(maximaU)-1)]
-        maxima_truth = maxima_truth + [True,]
+        maxima_truth = [(maximaU[mu + 1] - maximaU[mu]) > eps_STEP_AP21 for mu in range(0, len(maximaU) - 1)]
+        maxima_truth = maxima_truth + [True, ]
         maximaU = [mu for (mu, mt) in zip(maximaU, maxima_truth) if mt]
         maximaPoints = [mp for (mp, mt) in zip(maximaPoints, maxima_truth) if mt]
 
@@ -4397,11 +3481,13 @@ def BsplineCurveWithKnotsParse(localCentroid, ParsedEdge, STEP_entities_):
             maximaPoints.pop(-1)
         else:
             centroidDisp.append(vertex2centroidDisp)
+    else:
+        centroidDisp = []
 
-    #maximaPoints.insert(0, ParsedEdge['vertex1']) # ParsedEdge['pointFeature']['xyz'][0])
-    #maximaPoints.insert(-1, ParsedEdge['vertex2']) # ParsedEdge['pointFeature']['xyz'][-1])
-    ParsedEdge['pointFeature']['xyz'] = np.array([ParsedEdge['vertex1'],] + maximaPoints + [ParsedEdge['vertex2'],])
-    ParsedEdge['pointFeature']['u'] = [0,] + maximaU + [1]
+    # maximaPoints.insert(0, ParsedEdge['vertex1']) # ParsedEdge['pointFeature']['xyz'][0])
+    # maximaPoints.insert(-1, ParsedEdge['vertex2']) # ParsedEdge['pointFeature']['xyz'][-1])
+    ParsedEdge['pointFeature']['xyz'] = np.array([ParsedEdge['vertex1'], ] + maximaPoints + [ParsedEdge['vertex2'], ])
+    ParsedEdge['pointFeature']['u'] = [0, ] + maximaU + [1]
     ParsedEdge['pointFeature']['centroidDisp'] = centroidDisp
 
     # no point adding maxima & minima fields here
@@ -4423,7 +3509,6 @@ def BsplineCurveWithKnotsParse(localCentroid, ParsedEdge, STEP_entities_):
     #     ParsedEdge['maximaPoints'] = None
     #     ParsedEdge['maxPointCentroidDisp'] = None
     #     ParsedEdge['maxPoint'] = None
-
 
     # if len(minimaPoints) > 1:
     #     ParsedEdge['minimaPoints'] = minimaPoints
@@ -4498,24 +3583,56 @@ def BsplineCurveWithKnotsParse(localCentroid, ParsedEdge, STEP_entities_):
     ctrlptsDelta = [np.linalg.norm(splineMeanPoint - sc) for sc in BsplineKnotCurve.ctrlpts]
 
     # low ctrlptsDelta values suggest rotational symmetry,
-    if (max(np.abs(ctrlptsDelta)) < eps_STEP_AP21): # rotSymLimit constant --------------------------------------------
+    if (max(np.abs(ctrlptsDelta)) < eps_STEP_AP21):  # rotSymLimit constant --------------------------------------------
         ParsedEdge['rotSymFlag'] = 1
 
     ParsedEdge['BsplineKnotCurve'] = BsplineKnotCurve
 
 
-# def subEdgeParse(edgeInstance_, ParsedEdge, STEP_entities_):
-#     # SEAM_EDGE,
-#     ParsedEdge['subTypeName'] = STEP_entities_[ref2index(edgeInstance_)].type_name
-
-
 def edgeSTEPparse(edgeInstance_, STEP_entities_):
+    '''
+    Parse common STEP representation
+
+    :param STEP_entities_: object containing STEP data
+    :param edgeInstance_:  parsed common STEP data
+    :return
+    '''
+
+    # STEP ISO 10303-42 notes
+    # axis: the Direction that defines the second axis of the Axis_placement. The value of this attribute need not be specified.
+    # ref_direction: the direction used to determine the direction of the local X axis.
+    # The value of this attribute need not be specified. If axis or ref_direction is omitted, these directions are taken from the geometric coordinate system
+    # orientation: a BOOLEAN flag. If TRUE, the topological orientation as used coincides with the orientation,
+    # from start vertex to end vertex, of the edge_definition, if FALSE the vertices are reversed in order.
+    # edge_start: the start vertex of the Oriented_edge. This is derived from the vertices of the edge_definition after taking account of the orientation.
+    # edge_end: the end vertex of the Oriented_edge. This is derived from the vertices of the edge_definition after taking account of the orientation.
+
+
     # extract data common to all STEP edge instances
     ParsedEdge = {}
     if (STEP_entities_[ref2index(edgeInstance_)].type_name == 'ORIENTED_EDGE'):
         # if not hasattr(STEP_entities_[ref2index(edgeLoopInstance)].type_name, 'ORIENTED_EDGE'): ----------------------
         VOR = 'F' in STEP_entities_[ref2index(edgeInstance_)].params[-1]  # vertexOrderReversed
         ParsedEdge['VOR'] = VOR
+
+    if (STEP_entities_[ref2index(edgeInstance_)].type_name == 'TRIMMED_CURVE'):
+        _1=1
+        trimmedCurveParamPrecedence = STEP_entities_[ref2index(edgeInstance_)].params[-1]
+        VOR = 'F' in STEP_entities_[ref2index(edgeInstance_)].params[-2]  # vertexOrderReversed
+        trimmedCurveParams = cleanSubRefs(STEP_entities_[ref2index(edgeInstance_)].params)
+        if len(trimmedCurveParams) == 3: # curve ref & both vertex refs available
+            edgeCurveRef = trimmedCurveParams[0]
+            if (STEP_entities_[ref2index(trimmedCurveParams[1])].type_name == 'VERTEX_POINT'):
+                vertex1 = STEP_entities_[ref2index(trimmedCurveParams[1])].params
+                vertex1 = CP2point(STEP_entities_, cleanSubRefs(vertex1)[0])
+        # trimmedCurveRef = STEP_entities_[ref2index(edgeInstance_)].params[-2]
+        # assert STEP_entities_[ref2index(edgeCurveRef)].type_name == 'TRIMMED_CURVE'
+        # # edge_geometry: the Curve defining the geometric shape of the edge.
+        # # same_sense: a BOOLEAN variable giving the relationship between the topological sense
+        # #             of the edge and the parametric sense of the curve.
+        # trimmedCurveParams = STEP_entities_[ref2index(trimmedCurveRef)].params
+        # # edgeSameSense = 'T' in edgeCurveParams[-1]; ParsedEdge['sameSense'] = edgeSameSense
+        # trimmedCurveParams = cleanSubRefs(trimmedCurveParams)
 
     edgeCurveRef = STEP_entities_[ref2index(edgeInstance_)].params[-2]
     assert STEP_entities_[ref2index(edgeCurveRef)].type_name == 'EDGE_CURVE'
@@ -4557,15 +3674,15 @@ def edgeSTEPparse(edgeInstance_, STEP_entities_):
     ParsedEdge['pointFeature'] = {}
     ParsedEdge['pointFeature']['xyz'] = [ParsedEdge['vertex1'], ParsedEdge['vertex2']]
     ParsedEdge['pointFeature']['centroidDisp'] = [np.linalg.norm(centroid - vertex1),
-                                                     np.linalg.norm(centroid - vertex2)]
-    ParsedEdge['pointFeature']['u'] = [0, 1] # normalise to [0, 1]
+                                                  np.linalg.norm(centroid - vertex2)]
+    ParsedEdge['pointFeature']['u'] = [0, 1]  # normalise to [0, 1]
 
-    edgeType = STEP_entities_[ref2index(edgeCurveParams[2])].params
-    edgeTypeName = STEP_entities_[ref2index(edgeCurveParams[2])].type_name
+    edgeParams = STEP_entities_[ref2index(edgeCurveParams[2])].params
+    edgeParamsName = STEP_entities_[ref2index(edgeCurveParams[2])].type_name
     edgeRef = STEP_entities_[ref2index(edgeCurveParams[2])].ref
-    ParsedEdge['typeName'] = edgeTypeName
+    ParsedEdge['typeName'] = edgeParamsName
     ParsedEdge['edgeRef'] = edgeRef
-    ParsedEdge['edgeType'] = edgeType
+    ParsedEdge['edgeParams'] = edgeParams
 
     return ParsedEdge
 
@@ -4573,7 +3690,7 @@ def edgeSTEPparse(edgeInstance_, STEP_entities_):
     # while scope is unsettled this is parked here for edge object, presumably surface requires the same
 
     # 'subTypeName'
-    # 'subEdgeType'
+    # 'subedgeParams'
     # 'normDir'
     # 'radius'
     # 'axisPoint'
@@ -4585,10 +3702,68 @@ def edgeSTEPparse(edgeInstance_, STEP_entities_):
 
 
 def edgeParse(c, ParsedEdge, STEP_entities_):
-    #print("simpleEdgeParse edge type: " + ParsedEdge['typeName'])
+    '''
+    Process edge parsing according to STEP edge type
+
+    :param STEP_entities_: object containing STEP data
+    :param ParsedEdge:  parsed STEP edge data
+    :return
+    '''
+    # print("simpleEdgeParse edge type: " + ParsedEdge['typeName'])
 
     if (ParsedEdge['typeName'] == 'LINE'):
         segmentParse(c, ParsedEdge, STEP_entities_)
+
+    elif (ParsedEdge['typeName'] == 'TRIMMED_CURVE'): # identified here?
+        #
+        _1=1
+
+    elif (ParsedEdge['typeName'] == 'SURFACE_CURVE') or (ParsedEdge['typeName'] == 'SEAM_CURVE'):
+
+        #   SEAM_CURVE (not sure if this is worthwhile retaining)
+        #   associated geometry in following list does not seem to be defined elsewhere
+
+        #   Attribute	                Type	                                        Defined By
+        #   name	                    label (STRING)	                                representation_item
+        #   curve_3d	                curve (ENTITY)	                                surface_curve
+        #   associated_geometry	        LIST OF pcurve_or_surface (SELECT)	            surface_curve
+        #   master_representation	    preferred_surface_curve_representation (ENUM)	surface_curve
+
+        # todo: just create a superTypeName flag?
+
+        cleanEdgeParams = cleanSubRefs(ParsedEdge['edgeParams'])
+        edgeParamsName = STEP_entities[ref2index(cleanEdgeParams[0])].type_name
+        ParsedEdge['superTypeName'] = ParsedEdge['typeName']
+
+        edgeRef = STEP_entities[ref2index(cleanEdgeParams[0])].ref
+
+        ParsedEdge['superEdgeRef'] = ParsedEdge['edgeRef']
+        ParsedEdge['edgeRef'] = edgeRef
+        ParsedEdge['superEdgeParams'] = ParsedEdge['edgeParams']
+        ParsedEdge['edgeParams'] = STEP_entities[ref2index(cleanEdgeParams[0])].params  # todo: change edgeParams
+        ParsedEdge['superTypeName'] = ParsedEdge['typeName']
+        ParsedEdge['typeName'] = STEP_entities[ref2index(edgeRef)].type_name
+        edgeParse(centroid, ParsedEdge, STEP_entities)
+
+        # if ParsedEdge['edgeRef'] not in [pel['edgeRef'] for pel in ParsedEdgeLoop]:
+        #     ParsedEdgeLoop.append(ParsedEdge)
+
+        for cet in cleanEdgeParams[1:]:  # get associated surfaces, LIST OF pcurve_or_surface
+            if STEP_entities[ref2index(cet)].type_name == 'PCURVE':
+                # extract surface data from second parameter term
+                surfaceRef = STEP_entities[ref2index(cet)].params[1]
+
+                # surfaceRefCollection = []
+                # for AFS2 in AdvancedFaceSurfaces:
+                #     surfaceRefCollection.append(AFS2['SurfaceRef'])
+                # if surfaceRef not in surfaceRefCollection:
+                if surfaceRef not in [AFS2['SurfaceRef'] for AFS2 in AdvancedFaceSurfaces]:
+                    _1 = 1
+                    print('undetected surface! PCURVE')
+            else:
+                # todo: code for other surface option missing
+                print('undetermined surfacetype failure line2824')
+                _1 = 1
 
     elif (ParsedEdge['typeName'] == 'CIRCLE'):
         circleParse(c, ParsedEdge, STEP_entities_)
@@ -4599,32 +3774,90 @@ def edgeParse(c, ParsedEdge, STEP_entities_):
     elif (ParsedEdge['typeName'] == 'B_SPLINE_CURVE_WITH_KNOTS'):
         BsplineCurveWithKnotsParse(c, ParsedEdge, STEP_entities_)
 
-    else: print("simpleEdgeParse unknown edge type: " + ParsedEdge['typeName'])
+    # TRIMMED_CURVE ?
+
+    else:
+        print("simpleEdgeParse unknown edge type: " + ParsedEdge['typeName'])
 
 
-def sphereSurfaceParse(AFS, localCentroid, minimaExtrema=False):
-    # ENTITY Spherical_surface
-    #   SUBTYPE OF (Surface);
-    #   position : Axis_placement_3d;
-    #   radius : positive_length_measure;
 
-    # Attribute definitions:
-    # position: an Axis_placement_3d that defines the location and orientation of the surface for the purposes of parameterization.
-    # The centre of the Spherical_surface is at the location
-    # radius: the radius of the Spherical_surface.
+def revolvedSurfaceParse(AFS, c, minimaExtrema):
+    '''
+    Parse a revolved surface, optionally extract surface minima points relative to a local centroid point.
 
-    #  The axis is the placement Z axis direction and the ref_direction is an approximation to
-    # the placement X axis direction.= normDir
+    :param AFS: parsed surface data object
+    :param localCentroid: estimated surface median point based on extrema points identified
+    :param minimaExtrema: bool additional calculation to determine surface extrema
+    :return ParsedSurface object
+    '''
+
+    # A surface_of_revolution is the surface obtained by rotating a curve one complete revolution about an
+    # axis.
+    # Will assume that any curvature will be in the plane of the axis.
+    # Reposition curve on both sides of axis in plane of axis and local centroid to find maxima/minima, see cone
+
+    # SURFACE_OF_REVOLUTION
+    # ENTITY surface_of_revolution
+    # SUBTYPE OF (swept_surface);
+    # axis_position : axis1_placement;
+    # DERIVE
+    # axis_line : line := representation_item(’’)||
+    # geometric_representation_item()|| curve()||
+    # line(axis_position.location, representation_item(’’)||
+    # geometric_representation_item()||
+    # vector(axis_position.z, 1.0));
+
+    _1=1
 
 
-    if AFS.get('ParsedSurface') is not None: # recalculation of max/min
+    if AFS.get('ParsedSurface') is not None:  # recalculation of max/min
+        ParsedSurface = AFS['ParsedSurface']
+        axisPoint = ParsedSurface['axisPoint']
+        normDir = ParsedSurface['normDir']  # Z
+        #radius = ParsedSurface['radius']
+        #semiAngle = ParsedSurface['semiAngle']
+
+    else:
+
+        axisPoint, normDir = axis1Placement(AFS['SurfaceParams'][-1], STEP_entities)
+
+        semiAngle = AFS['SurfaceParams'][-1]
+        radius = AFS['SurfaceParams'][-2]
+
+        ParsedSurface = {}
+        ParsedSurface['axisPoint'] = axisPoint
+        ParsedSurface['normDir'] = normDir  # Z
+        #ParsedSurface['refDir'] = refDir  # X
+        #ParsedSurface['auxDir'] = auxDir
+        ParsedSurface['semiAngle'] = semiAngle
+        ParsedSurface['radius'] = radius
+
+        ParsedSurface['pointFeature'] = {}
+        ParsedSurface['pointFeature']['xyz'] = []
+        ParsedSurface['pointFeature']['centroidDisp'] = []
+        ParsedSurface['pointFeature']['maxima'] = []
+        ParsedSurface['pointFeature']['minima'] = []
+
+        AFS[
+            'ParsedSurface'] = ParsedSurface  # for the purpose of extracting axisPoint, normDir for inside/outside point detection
+
+    AFS['ParsedSurface'] = ParsedSurface
+    if not minimaExtrema:
+        # return ParsedSurface
+        return
+
+    # test if cone is rotationally symmetrical, if localCentroid is close to axisDir through axisPoint
+    rotSymDisp = np.linalg.norm((centroid - axisPoint) - np.dot((centroid - axisPoint), normDir) * normDir)
+
+
+    if AFS.get('ParsedSurface') is not None:  # recalculation of max/min
         ParsedSurface = AFS['ParsedSurface']
         centrePoint = ParsedSurface['axisPoint']
-        normDir = ParsedSurface['normDir'] # Z
-        refDir = ParsedSurface['refDir'] # X
+        normDir = ParsedSurface['normDir']  # Z
+        refDir = ParsedSurface['refDir']  # X
         auxDir = ParsedSurface['auxDir']  # Y
     else:
-        centrePoint, normDir, refDir = axis2Placement3D_2(AFS['SurfaceParams'][1], STEP_entities)
+        centrePoint, normDir, refDir = axis2Placement3D(AFS['SurfaceParams'][1], STEP_entities)
         auxDir = np.cross(normDir, refDir)
         auxDir = auxDir / np.linalg.norm(auxDir)
         radius = AFS['SurfaceParams'][-1]
@@ -4643,7 +3876,62 @@ def sphereSurfaceParse(AFS, localCentroid, minimaExtrema=False):
         ParsedSurface['pointFeature']['minima'] = []
 
     AFS['ParsedSurface'] = ParsedSurface
-    if not minimaExtrema: # not much point
+    if not minimaExtrema:  # not much point
+        # return ParsedSurface
+        return
+
+
+def sphereSurfaceParse(AFS, localCentroid, minimaExtrema=False):
+    '''
+    Parse a spherical surface, optionally extract surface minima points relative to a local centroid point.
+
+    :param AFS: parsed surface data object
+    :param localCentroid: estimated surface median point based on extrema points identified
+    :param minimaExtrema: bool additional calculation to determine surface extrema
+    :return ParsedSurface object
+    '''
+
+    # STEP ISO 10303-42 notes, EXPRESS descriptor
+    # ENTITY Spherical_surface
+    #   SUBTYPE OF (Surface);
+    #   position : Axis_placement_3d;
+    #   radius : positive_length_measure;
+
+    # Attribute definitions:
+    # position: an Axis_placement_3d that defines the location and orientation of the surface for the purposes of parameterization.
+    # The centre of the Spherical_surface is at the location
+    # radius: the radius of the Spherical_surface.
+
+    #  The axis is the placement Z axis direction and the ref_direction is an approximation to
+    # the placement X axis direction.= normDir
+
+    if AFS.get('ParsedSurface') is not None:  # recalculation of max/min
+        ParsedSurface = AFS['ParsedSurface']
+        centrePoint = ParsedSurface['axisPoint']
+        normDir = ParsedSurface['normDir']  # Z
+        refDir = ParsedSurface['refDir']  # X
+        auxDir = ParsedSurface['auxDir']  # Y
+    else:
+        centrePoint, normDir, refDir = axis2Placement3D(AFS['SurfaceParams'][1], STEP_entities)
+        auxDir = np.cross(normDir, refDir)
+        auxDir = auxDir / np.linalg.norm(auxDir)
+        radius = AFS['SurfaceParams'][-1]
+
+        ParsedSurface = {}
+        ParsedSurface['radius'] = radius
+        ParsedSurface['axisPoint'] = centrePoint
+        ParsedSurface['normDir'] = normDir  # Z
+        ParsedSurface['refDir'] = refDir  # X
+        ParsedSurface['auxDir'] = auxDir
+
+        ParsedSurface['pointFeature'] = {}
+        ParsedSurface['pointFeature']['xyz'] = []
+        ParsedSurface['pointFeature']['centroidDisp'] = []
+        ParsedSurface['pointFeature']['maxima'] = []
+        ParsedSurface['pointFeature']['minima'] = []
+
+    AFS['ParsedSurface'] = ParsedSurface
+    if not minimaExtrema:  # not much point
         # return ParsedSurface
         return
 
@@ -4657,7 +3945,7 @@ def sphereSurfaceParse(AFS, localCentroid, minimaExtrema=False):
     # refDir, auxDir doesn't mean much in stock implementaions.
 
     sphereCentroidOffset = np.linalg.norm(centrePoint - localCentroid)
-    if sphereCentroidOffset < eps_STEP_AP21: # determine if centroid is coincident with sphere centre
+    if sphereCentroidOffset < eps_STEP_AP21:  # determine if centroid is coincident with sphere centre
         ParsedSurface['sphereFeatureFlag'] = True
 
         ParsedSurface['rotSymFeature'] = dict()
@@ -4676,23 +3964,33 @@ def sphereSurfaceParse(AFS, localCentroid, minimaExtrema=False):
         maxPoint = centrePoint + sphereCentreCentroidDir * radius
         minPoint = centrePoint - sphereCentreCentroidDir * radius
 
-        if insideOutsideSurfaceTest(localCentroid, maxPoint, AFS): # maxima not among edges
+        if insideOutsideSurfaceTest(localCentroid, maxPoint, AFS):  # maxima not among edges
             ParsedSurface['pointFeature']['xyz'].append(maxPoint)
             ParsedSurface['pointFeature']['centroidDisp'].append(np.linalg.norm(maxPoint - localCentroid))
             ParsedSurface['pointFeature']['maxima'].append(False)
             ParsedSurface['pointFeature']['minima'].append(True)
 
-        if insideOutsideSurfaceTest(localCentroid, minPoint, AFS): # maxima not among edges
+        if insideOutsideSurfaceTest(localCentroid, minPoint, AFS):  # maxima not among edges
             ParsedSurface['pointFeature']['xyz'].append(minPoint)
             ParsedSurface['pointFeature']['centroidDisp'].append(np.linalg.norm(minPoint - localCentroid))
             ParsedSurface['pointFeature']['maxima'].append(True)
             ParsedSurface['pointFeature']['minima'].append(False)
 
     AFS['ParsedSurface'] = ParsedSurface
-    #return ParsedSurface
+    # return ParsedSurface
 
 
 def toroidSurfaceParse(AFS, localCentroid, minimaExtrema=False):
+    '''
+    Parse a toroidal surface, optionally extract surface minima points relative to a local centroid point.
+
+    :param AFS: parsed surface data object
+    :param localCentroid: estimated surface median point based on extrema points identified
+    :param minimaExtrema: bool additional calculation to determine surface extrema
+    :return ParsedSurface object
+    '''
+
+    # STEP ISO 10303-42 notes, EXPRESS descriptor
     # ENTITY Toroidal_surface
     #   SUBTYPE OF (Surface);
     #   position : Axis_placement_3d;
@@ -4709,15 +4007,18 @@ def toroidSurfaceParse(AFS, localCentroid, minimaExtrema=False):
     # minor_radius: the radius of one of the circles produced by intersecting the Toroidal_surface with a plane
     # containing the central axis.
 
-    if AFS.get('ParsedSurface') is not None: # recalculation of max/min
+    if AFS.get('ParsedSurface') is not None:  # recalculation of max/min
         ParsedSurface = AFS['ParsedSurface']
         axisPoint = ParsedSurface['axisPoint']
-        normDir = ParsedSurface['normDir'] # Z
-        refDir = ParsedSurface['refDir'] # X
+        normDir = ParsedSurface['normDir']  # Z
+        refDir = ParsedSurface['refDir']  # X
         auxDir = ParsedSurface['auxDir']  # Y
+
+        minorRadius = ParsedSurface['minorRadius']
+        majorRadius = ParsedSurface['majorRadius']
     else:
         ParsedSurface = {}
-        axisPoint, normDir, refDir = axis2Placement3D_2(AFS['SurfaceParams'][1], STEP_entities)
+        axisPoint, normDir, refDir = axis2Placement3D(AFS['SurfaceParams'][1], STEP_entities)
         auxDir = np.cross(normDir, refDir)
         auxDir = auxDir / np.linalg.norm(auxDir)
         minorRadius = AFS['SurfaceParams'][-1]
@@ -4764,8 +4065,8 @@ def toroidSurfaceParse(AFS, localCentroid, minimaExtrema=False):
     if rotSymDisp < eps_STEP_AP21:
         ParsedEdge['rotSymFeature'] = dict()
         ParsedEdge['rotSymFeature']['rotSymCentre'] = axisPoint
-        #ParsedEdge['rotSymFeature']['rotSymRadius'] = radius
-        #ParsedSurface['rotSymCentre'] = axisPoint
+        # ParsedEdge['rotSymFeature']['rotSymRadius'] = radius
+        # ParsedSurface['rotSymCentre'] = axisPoint
     else:
         # create axes for circles based at points of majorMinPoint, majorMaxPoint
         # minima case, create new axis at majorMinPoint
@@ -4795,7 +4096,7 @@ def toroidSurfaceParse(AFS, localCentroid, minimaExtrema=False):
             minorRadius,
         )
 
-        #ParsedSurface['minPoint'] = minorMinPoint
+        # ParsedSurface['minPoint'] = minorMinPoint
 
         # same for maxima
         majorMaxRadialDir = (majorMaxPoint - axisPoint) / np.linalg.norm(
@@ -4814,33 +4115,41 @@ def toroidSurfaceParse(AFS, localCentroid, minimaExtrema=False):
         )
 
         # np.linalg.norm(centroid - tMinorMinPoint) < np.linalg.norm(centroid - tMinorMaxPoint)
-        #ParsedSurface['maxPoint'] = minorMaxPoint
+        # ParsedSurface['maxPoint'] = minorMaxPoint
 
         # determine if maxPoint/minPoint are inside or outside an edge_loop defined boundary
         # CCW directionality of edge vertices determines outward surface normal
         # surface minPoint/maxPoint always orthonormal to localCentroid
 
-        if insideOutsideSurfaceTest(localCentroid, minorMaxPoint, AFS): # maxima is among edges
+        if insideOutsideSurfaceTest(localCentroid, minorMaxPoint, AFS):  # maxima is among edges
             ParsedSurface['pointFeature']['xyz'].append(minorMaxPoint)
             ParsedSurface['pointFeature']['centroidDisp'].append(np.linalg.norm(minorMaxPoint - localCentroid))
             ParsedSurface['pointFeature']['maxima'].append(False)
             ParsedSurface['pointFeature']['minima'].append(True)
 
-        if insideOutsideSurfaceTest(localCentroid, minorMinPoint, AFS): # minima is among edges
+        if insideOutsideSurfaceTest(localCentroid, minorMinPoint, AFS):  # minima is among edges
             ParsedSurface['pointFeature']['xyz'].append(minorMinPoint)
             ParsedSurface['pointFeature']['centroidDisp'].append(np.linalg.norm(minorMinPoint - localCentroid))
             ParsedSurface['pointFeature']['maxima'].append(True)
             ParsedSurface['pointFeature']['minima'].append(False)
 
     AFS['ParsedSurface'] = ParsedSurface
-    #return ParsedSurface
+    # return ParsedSurface
 
 
 def cylinderSurfaceParse(AFS, localCentroid, minimaExtrema=False):
     '''
-    maximaExtrema flag, exit function without expensive minima calculations.
+    Parse a cylindrical surface, optionally extract surface minima points relative to a local centroid point.
+    minimaExtrema flag, exit function without expensive minima calculations.
+
     Used during centroid iteration
+    :param AFS: parsed surface data object
+    :param localCentroid: estimated surface median point based on extrema points identified
+    :param minimaExtrema: bool additional calculation to determine surface extrema
+    :return ParsedSurface object
     '''
+
+    # STEP ISO 10303-42 notes, EXPRESS descriptor
     # ENTITY Cylindrical_surface
     #   SUBTYPE OF (Surface);
     #   position : Axis_placement_3d;
@@ -4851,15 +4160,15 @@ def cylinderSurfaceParse(AFS, localCentroid, minimaExtrema=False):
     # radius: the radius of the circular curve of intersection between the surface of the cylinder and a plane
     # perpendicular to the axis of the Cylindrical_surface.
 
-    if AFS.get('ParsedSurface') is not None: # recalculation of max/min
+    if AFS.get('ParsedSurface') is not None:  # recalculation of max/min
         ParsedSurface = AFS['ParsedSurface']
         axisPoint = ParsedSurface['axisPoint']
-        normDir = ParsedSurface['normDir'] # Z
-        refDir = ParsedSurface['refDir'] # X
+        normDir = ParsedSurface['normDir']  # Z
+        refDir = ParsedSurface['refDir']  # X
         auxDir = ParsedSurface['auxDir']  # Y
         radius = ParsedSurface['radius']
     else:
-        axisPoint, normDir, refDir = axis2Placement3D_2(AFS['SurfaceParams'][1], STEP_entities)
+        axisPoint, normDir, refDir = axis2Placement3D(AFS['SurfaceParams'][1], STEP_entities)
         auxDir = np.cross(normDir, refDir)
         auxDir = auxDir / np.linalg.norm(auxDir)
         radius = AFS['SurfaceParams'][-1]
@@ -4867,7 +4176,8 @@ def cylinderSurfaceParse(AFS, localCentroid, minimaExtrema=False):
         ParsedSurface = {}
         ParsedSurface['radius'] = radius
         ParsedSurface['axisPoint'] = axisPoint
-        ParsedSurface['normDir'] = normDir  # Z # FreeCAD STEP generator reverses normal wrt to cylinder end planes.. ignore?
+        ParsedSurface[
+            'normDir'] = normDir  # Z # FreeCAD STEP generator reverses normal wrt to cylinder end planes.. ignore?
         ParsedSurface['refDir'] = refDir  # X
         ParsedSurface['auxDir'] = auxDir
 
@@ -4877,9 +4187,9 @@ def cylinderSurfaceParse(AFS, localCentroid, minimaExtrema=False):
         ParsedSurface['pointFeature']['maxima'] = []
         ParsedSurface['pointFeature']['minima'] = []
 
-    AFS['ParsedSurface'] = ParsedSurface
+
     if not minimaExtrema:
-        # return ParsedSurface
+        AFS['ParsedSurface'] = ParsedSurface
         return
 
     # test if cylinder is rotationally symmetrical, if localCentroid is close to axisDir through axisPoint
@@ -4889,7 +4199,7 @@ def cylinderSurfaceParse(AFS, localCentroid, minimaExtrema=False):
 
     if rotSymDisp < eps_STEP_AP21:
         minSurfaceDispPoint = localCentroid  # for creating a minima plane intersection
-        #centroidProjAxisPoint = centroid
+        # centroidProjAxisPoint = centroid
         # maxima is circular edge centre, determined from vertices
         # minima is orthogonal to centroid
         # shouldn't there also be a radius measure?? check: not in doctorate schema
@@ -4913,7 +4223,7 @@ def cylinderSurfaceParse(AFS, localCentroid, minimaExtrema=False):
         for edge in AFS['outerBoundEdgeLoop']:
             for cd in edge['pointFeature']['centroidDisp']:
                 if np.isclose(cd, radius, eps):
-                    edgeMinimaCount +=1
+                    edgeMinimaCount += 1
 
         if edgeMinimaCount % 2 == 0:
             ParsedSurface['rotSymFeature'] = dict()
@@ -4967,7 +4277,7 @@ def cylinderSurfaceParse(AFS, localCentroid, minimaExtrema=False):
             surfaceMinPoint = localCentroid + smp
 
         # can't determine in advance whether rotSymMax or rotSymCentre => requires subsequent comparison to adjacent nodes
-        
+
         if insideOutsideSurfaceTest(localCentroid, surfaceMinPoint, AFS):  # minima is among edges
             ParsedSurface['pointFeature']['xyz'].append(surfaceMinPoint)
             ParsedSurface['pointFeature']['centroidDisp'].append(np.linalg.norm(surfaceMinPoint - localCentroid))
@@ -4978,6 +4288,17 @@ def cylinderSurfaceParse(AFS, localCentroid, minimaExtrema=False):
 
 
 def coneSurfaceParse(AFS, localCentroid, minimaExtrema=False):
+    '''
+    Parse a conical surface, optionally extract surface minima points relative to a local centroid point.
+    minimaExtrema flag, exit function without expensive minima calculations (used during centroid iteration)
+
+    :param AFS: parsed surface data object
+    :param localCentroid: estimated surface median point based on extrema points identified
+    :param minimaExtrema: bool additional calculation to determine surface extrema
+    :return ParsedSurface object
+    '''
+
+    # STEP ISO 10303-42 notes, EXPRESS descriptor
     # ENTITY Conical_surface
     #   SUBTYPE OF (Surface);
     #   position : Axis_placement_3d;
@@ -4994,17 +4315,17 @@ def coneSurfaceParse(AFS, localCentroid, minimaExtrema=False):
     # note 2 that the radial surface may define the top of a frustum rather than the base, need to check enclosing edges
     # https://quaoar.su/files/standards/Standard%20-%202003%20-%20ISO%2010303-42.pdf p88
 
-    if AFS.get('ParsedSurface') is not None: # recalculation of max/min
+    if AFS.get('ParsedSurface') is not None:  # recalculation of max/min
         ParsedSurface = AFS['ParsedSurface']
         axisPoint = ParsedSurface['axisPoint']
-        normDir = ParsedSurface['normDir'] # Z
-        refDir = ParsedSurface['refDir'] # X
+        normDir = ParsedSurface['normDir']  # Z
+        refDir = ParsedSurface['refDir']  # X
         auxDir = ParsedSurface['auxDir']  # Y
         radius = ParsedSurface['radius']
         semiAngle = ParsedSurface['semiAngle']
 
     else:
-        axisPoint, normDir, refDir = axis2Placement3D_2(AFS['SurfaceParams'][1], STEP_entities)
+        axisPoint, normDir, refDir = axis2Placement3D(AFS['SurfaceParams'][1], STEP_entities)
         auxDir = np.cross(normDir, refDir)
         auxDir = auxDir / np.linalg.norm(auxDir)
         semiAngle = AFS['SurfaceParams'][-1]
@@ -5024,7 +4345,8 @@ def coneSurfaceParse(AFS, localCentroid, minimaExtrema=False):
         ParsedSurface['pointFeature']['maxima'] = []
         ParsedSurface['pointFeature']['minima'] = []
 
-        AFS['ParsedSurface'] = ParsedSurface # for the purpose of extracting axisPoint, normDir for inside/outside point detection
+        AFS[
+            'ParsedSurface'] = ParsedSurface  # for the purpose of extracting axisPoint, normDir for inside/outside point detection
 
     AFS['ParsedSurface'] = ParsedSurface
     if not minimaExtrema:
@@ -5036,12 +4358,12 @@ def coneSurfaceParse(AFS, localCentroid, minimaExtrema=False):
         (localCentroid - axisPoint) - np.dot((localCentroid - axisPoint), normDir) * normDir
     )
 
-    #rotSymDisp = pointProjectAxis(localCentroid, axisPoint, normDir)
+
+    # rotSymDisp = pointProjectAxis(localCentroid, axisPoint, normDir)
 
     axisPointApexDisp = radius / np.tan(semiAngle)
     # find point at cone/triangle apex
     apexPoint = axisPoint + axisPointApexDisp * (-normDir)
-
 
     # circle edge cannot be declared groove or ridge prior to discovery of adjacent surfaces
     # rotationally-symmetric edge must be assigned indeterminate status with centroid & radius
@@ -5053,8 +4375,8 @@ def coneSurfaceParse(AFS, localCentroid, minimaExtrema=False):
             ParsedEdge['rotSymFeature']['rotSymCentre'] = apexPoint
             ParsedEdge['rotSymFeature']['rotSymRadius'] = 0
 
-            #ParsedSurface['rotSymCentre'] = apexPoint
-            #ParsedSurface['rotSymRadius'] = 0
+            # ParsedSurface['rotSymCentre'] = apexPoint
+            # ParsedSurface['rotSymRadius'] = 0
 
     else:
 
@@ -5063,11 +4385,11 @@ def coneSurfaceParse(AFS, localCentroid, minimaExtrema=False):
             minPlaneNorm = np.cross((apexPoint - localCentroid), (apexPoint - axisPoint))
             minPlaneNorm = minPlaneNorm / np.linalg.norm(minPlaneNorm)
 
-            coneEdgeCW = np.dot(rotationMatrix(minPlaneNorm, semiAngle),(apexPoint - axisPoint))
+            coneEdgeCW = np.dot(rotationMatrix(minPlaneNorm, semiAngle), (apexPoint - axisPoint))
             coneEdgeCW = coneEdgeCW / np.linalg.norm(coneEdgeCW)
             coneMinCW = pointProjectAxis(localCentroid, apexPoint, coneEdgeCW)
 
-            coneEdgeCCW = np.dot(rotationMatrix(minPlaneNorm, -semiAngle),(apexPoint - axisPoint))
+            coneEdgeCCW = np.dot(rotationMatrix(minPlaneNorm, -semiAngle), (apexPoint - axisPoint))
             coneEdgeCCW = coneEdgeCCW / np.linalg.norm(coneEdgeCCW)
             coneMinCCW = pointProjectAxis(localCentroid, apexPoint, coneEdgeCCW)
 
@@ -5094,14 +4416,15 @@ def coneSurfaceParse(AFS, localCentroid, minimaExtrema=False):
             for edge in AFS['outerBoundEdgeLoop']:
                 for cd in edge['pointFeature']['centroidDisp']:
                     if np.isclose(cd, rotSymCentroidDisp, eps_STEP_AP21):
-                        edgeMinimaCount +=1
+                        edgeMinimaCount += 1
 
             if edgeMinimaCount % 2 == 0:
                 ParsedSurface['rotSymFeature'] = dict()
                 ParsedSurface['rotSymFeature']['rotSymCentre'] = coneMinimaCentrePoint
-                ParsedSurface['rotSymFeature']['rotSymRadius'] = np.linalg.norm(coneMinimaCentrePoint - apexPoint) * np.tan(semiAngle)
-                #ParsedSurface['rotSymRadius'] = np.linalg.norm(coneMinimaCentrePoint - apexPoint) * np.tan(semiAngle)
-                #ParsedSurface['rotSymCentre'] = coneMinimaCentrePoint
+                ParsedSurface['rotSymFeature']['rotSymRadius'] = np.linalg.norm(
+                    coneMinimaCentrePoint - apexPoint) * np.tan(semiAngle)
+                # ParsedSurface['rotSymRadius'] = np.linalg.norm(coneMinimaCentrePoint - apexPoint) * np.tan(semiAngle)
+                # ParsedSurface['rotSymCentre'] = coneMinimaCentrePoint
 
     # else:
     #
@@ -5156,7 +4479,19 @@ def coneSurfaceParse(AFS, localCentroid, minimaExtrema=False):
 
 
 def BSplineSurfaceWithKnotsParse(AFS, localCentroid, STEP_entities_, minimaExtrema=False):
+    '''
+    Parse a BSplineSurfaceWithKnotsParse surface, optionally extract surface minima points relative to a
+    local centroid point.
+    minimaExtrema flag, exit function without expensive minima calculations (used during centroid iteration)
 
+    :param AFS: parsed surface data object
+    :param localCentroid: estimated surface median point based on extrema points identified
+    :param STEP_entities_: object containing STEP data
+    :param minimaExtrema: bool additional calculation to determine surface extrema
+    :return ParsedSurface object
+    '''
+
+    # STEP ISO 10303-42 notes, EXPRESS descriptor
     # ENTITY Surface_with_explicit_knots
     #   SUBTYPE OF (B_spline_surface);
     #   u_knot_multiplicities : LIST[2:?] OF INTEGER;
@@ -5195,14 +4530,6 @@ def BSplineSurfaceWithKnotsParse(AFS, localCentroid, STEP_entities_, minimaExtre
     # SELFnb_spline_surface.control_points: Array (two-dimensional) of control points defining surface
     # geometry. This array is constructed from the control points list
 
-    #       u_degree : INTEGER;
-    #       v_degree : INTEGER;
-    #       control_points_list : LIST [2:?] OF LIST [2:?] OF cartesian_point;
-    #       surface_form : b_spline_surface_form;
-    #       u_closed : LOGICAL;
-    #       v_closed : LOGICAL;
-    #       self_intersect : LOGICAL;
-
     if AFS.get('ParsedSurface') is not None:
         ParsedSurface = AFS['ParsedSurface']
         surfaceUdegree = ParsedSurface['surfaceUdegree']
@@ -5231,7 +4558,7 @@ def BSplineSurfaceWithKnotsParse(AFS, localCentroid, STEP_entities_, minimaExtre
 
         surfaceUdegree = AFS['SurfaceParams'][offset]
         surfaceVdegree = AFS['SurfaceParams'][offset + 1]
-        controlPointsRefs = AFS['SurfaceParams'][offset + 2] # need to flatten
+        controlPointsRefs = AFS['SurfaceParams'][offset + 2]  # need to flatten
         surfaceForm = AFS['SurfaceParams'][offset + 3]
         closedU = 'T' in AFS['SurfaceParams'][offset + 4]
         closedV = 'T' in AFS['SurfaceParams'][offset + 5]
@@ -5266,7 +4593,7 @@ def BSplineSurfaceWithKnotsParse(AFS, localCentroid, STEP_entities_, minimaExtre
 
         controlPointsLenU = len(controlPointsRefs)
         controlPointsLenV = len(controlPointsRefs[0])
-        #controlPointsRefs = cleanSubRefs(controlPointsRefs)
+        # controlPointsRefs = cleanSubRefs(controlPointsRefs)
 
         # extract control points
         # controlPoints = []
@@ -5293,7 +4620,7 @@ def BSplineSurfaceWithKnotsParse(AFS, localCentroid, STEP_entities_, minimaExtre
                 STEPknotUvector.append(knotsU[kml])
         ParsedSurface['STEPknotUvector'] = STEPknotUvector
 
-        if (len(STEPknotUvector) - len(controlPoints) - surfaceUdegree) != 1:
+        if (len(STEPknotUvector) - controlPointsLenU - surfaceUdegree) != 1:
             print("maldefined B-spline surface (U) !")
 
         # p.106 https://quaoar.su/files/standards/Standard%20-%202003%20-%20ISO%2010303-42.pdf
@@ -5306,10 +4633,10 @@ def BSplineSurfaceWithKnotsParse(AFS, localCentroid, STEP_entities_, minimaExtre
 
         # note _knotXvector values not used as Piegel+Tiller algorithms don't always work with explicit knots
 
-        if (len(STEPknotVvector) - len(controlPoints) - surfaceVdegree) != 1:
+        if (len(STEPknotVvector) - controlPointsLenV - surfaceVdegree) != 1:
             print("maldefined B-spline surface (V) !")
 
-        #BsplineKnotSurface = BSpline.Surface(normalize_kv=True)
+        # BsplineKnotSurface = BSpline.Surface(normalize_kv=True)
         BsplineKnotSurface = NURBS.Surface()
         BsplineKnotSurface.degree_u = surfaceUdegree
         BsplineKnotSurface.degree_v = surfaceVdegree
@@ -5320,9 +4647,9 @@ def BSplineSurfaceWithKnotsParse(AFS, localCentroid, STEP_entities_, minimaExtre
         ctrlptsw = compatibility.combine_ctrlpts_weights(controlPoints, weights=None)
         BsplineKnotSurface.set_ctrlpts(ctrlptsw, controlPointsLenU, controlPointsLenV)
 
-        #BsplineKnotSurface.ctrlpts2d = controlPoints
-        #BsplineKnotSurface.knotvector_u = STEPknotUvector
-        #BsplineKnotSurface.knotvector_v = STEPknotVvector
+        # BsplineKnotSurface.ctrlpts2d = controlPoints
+        # BsplineKnotSurface.knotvector_u = STEPknotUvector
+        # BsplineKnotSurface.knotvector_v = STEPknotVvector
 
         BsplineKnotSurface.knotvector_u = utilities.generate_knot_vector(surfaceUdegree,
                                                                          controlPointsLenU)
@@ -5342,36 +4669,35 @@ def BSplineSurfaceWithKnotsParse(AFS, localCentroid, STEP_entities_, minimaExtre
 
     # local minima/maxima
     maxPointsUV = rationalSurfaceExtremaParam_5(BsplineKnotSurface,
-                                                 localCentroid,
-                                                 maxSearch=True,
-                                                 localExtrema=True,
-                                                 curvatureTest=False,
-                                                 uv_xyz=True)
+                                                localCentroid,
+                                                maxSearch=True,
+                                                localExtrema=True,
+                                                curvatureTest=False,
+                                                uv_xyz=True)
 
     maxPoints = BsplineKnotSurface.evaluate_list(maxPointsUV)
 
     minPointsUV = rationalSurfaceExtremaParam_5(BsplineKnotSurface,
-                                              localCentroid,
-                                              maxSearch=False,
-                                              localExtrema=True,
-                                              curvatureTest=False,
-                                              uv_xyz=True)
+                                                localCentroid,
+                                                maxSearch=False,
+                                                localExtrema=True,
+                                                curvatureTest=False,
+                                                uv_xyz=True)
 
     minPoints = BsplineKnotSurface.evaluate_list(minPointsUV)
 
     # normalise u,v to [0, 1] - not required with geomdl generated knot vectors
-    #knotUrange = STEPknotUvector[-1] - STEPknotUvector[0]
-    #knotVrange = STEPknotVvector[-1] - STEPknotVvector[0]
-    #maxPointsUV = [((mpu[0] - STEPknotUvector[0])/knotUrange, (mpu[1] - STEPknotVvector[0])/knotVrange ) for mpu in maxPointsUV]
-    #minPointsUV = [((mpu[0] - STEPknotUvector[0])/knotUrange, (mpu[1] - STEPknotVvector[0])/knotVrange ) for mpu in minPointsUV]
+    # knotUrange = STEPknotUvector[-1] - STEPknotUvector[0]
+    # knotVrange = STEPknotVvector[-1] - STEPknotVvector[0]
+    # maxPointsUV = [((mpu[0] - STEPknotUvector[0])/knotUrange, (mpu[1] - STEPknotVvector[0])/knotVrange ) for mpu in maxPointsUV]
+    # minPointsUV = [((mpu[0] - STEPknotUvector[0])/knotUrange, (mpu[1] - STEPknotVvector[0])/knotVrange ) for mpu in minPointsUV]
 
     maxima = [True, ] * len(maxPoints) + [False, ] * len(minPoints)
     minima = [False, ] * len(maxPoints) + [True, ] * len(minPoints)
 
-    maximaUV = np.array(maxPointsUV + minPointsUV)
-    maximaPoints = np.array(maxPoints + minPoints)
+    maximaUV = maxPointsUV + minPointsUV
+    maximaPoints = maxPoints + minPoints
     if len(maximaPoints) > 1:
-
         # create explicit dtype fields to permit sorting via u, then v
         maximaUV_field = maximaUV.ravel().view(dtype=[('u', maximaUV.dtype), ('v', maximaUV.dtype)])
         extremaUVindex = np.argsort(maximaUV_field, order=('u', 'v'))
@@ -5381,35 +4707,11 @@ def BSplineSurfaceWithKnotsParse(AFS, localCentroid, STEP_entities_, minimaExtre
         minima = [minima[euvi] for euvi in extremaUVindex]
 
         # because Newton-Raphson will converge on a tangent, separate max/min values may be identical
-        maxima_truth = [np.allclose(maximaUV[mu + 1], maximaUV[mu], eps_STEP_AP21) for mu in range(0, len(maximaUV)-1)]
-        maxima_truth = maxima_truth + [False,]
+        maxima_truth = [np.allclose(maximaUV[mu + 1], maximaUV[mu], eps_STEP_AP21) for mu in
+                        range(0, len(maximaUV) - 1)]
+        maxima_truth = maxima_truth + [False, ]
         maximaUV = [mu for (mu, mt) in zip(maximaUV, maxima_truth) if not mt]
         maximaPoints = [mp for (mp, mt) in zip(maximaPoints, maxima_truth) if not mt]
-
-        # if vertex1 centroidDisp is close to u[0],
-        # or vertex2 centroidDisp is close to u[-1],
-        # remove u[0], u[-1]
-
-        # centroidDisp = [np.linalg.norm(mp - localCentroid) for mp in maximaPoints]
-        # vertex1centroidDisp = np.linalg.norm(ParsedEdge['vertex1'] - localCentroid)
-        # vertex2centroidDisp = np.linalg.norm(ParsedEdge['vertex2'] - localCentroid)
-    #     if np.abs(vertex1centroidDisp - centroidDisp[0]) < eps_STEP_AP21:
-    #         maximaU.pop(0)
-    #         maximaPoints.pop(0)
-    #     else:
-    #         centroidDisp.insert(0, vertex1centroidDisp)
-    #     if np.abs(vertex2centroidDisp - centroidDisp[-1]) < eps_STEP_AP21:
-    #         maximaU.pop(-1)
-    #         maximaPoints.pop(-1)
-    #     else:
-    #         centroidDisp.append(vertex2centroidDisp)
-    #
-    # #maximaPoints.insert(0, ParsedEdge['vertex1']) # ParsedEdge['pointFeature']['xyz'][0])
-    # #maximaPoints.insert(-1, ParsedEdge['vertex2']) # ParsedEdge['pointFeature']['xyz'][-1])
-    # ParsedEdge['pointFeature']['xyz'] = [ParsedEdge['vertex1'],] + maximaPoints + [ParsedEdge['vertex2'],]
-    # ParsedEdge['pointFeature']['u'] = [0,] + maximaU + [1]
-    # ParsedEdge['pointFeature']['centroidDisp'] = centroidDisp
-
 
     ParsedSurface['pointFeature']['xyz'] = maximaPoints
     ParsedSurface['pointFeature']['uv'] = maximaUV
@@ -5420,6 +4722,7 @@ def BSplineSurfaceWithKnotsParse(AFS, localCentroid, STEP_entities_, minimaExtre
     # detect rotationally symmetric spline surfaces, spline surface cylinder
     # get the median point of rings/arcs of control points
     spinePoints = np.array([np.array(s).mean(axis=0) for s in BsplineKnotSurface.ctrlpts2d])
+
     # test for deviation from mean point
     rowDelta = []
     for s in range(0, len(spinePoints) - 1):
@@ -5431,7 +4734,7 @@ def BSplineSurfaceWithKnotsParse(AFS, localCentroid, STEP_entities_, minimaExtre
     # consistentCrossSection = np.array(rowDelta).var()
     # should show up with edge maxima/minima
 
-    #spinePointDisps = [np.linalg.norm(spinePoints[s] - BsplineKnotSurface.ctrlpts2d[s]) for s in range(0, len(BsplineKnotSurface.ctrlpts2d))]
+    # spinePointDisps = [np.linalg.norm(spinePoints[s] - BsplineKnotSurface.ctrlpts2d[s]) for s in range(0, len(BsplineKnotSurface.ctrlpts2d))]
     spinePointsMean = spinePoints.mean(axis=0)
     uu, dd, vv = np.linalg.svd(spinePoints - spinePointsMean)
 
@@ -5448,16 +4751,29 @@ def BSplineSurfaceWithKnotsParse(AFS, localCentroid, STEP_entities_, minimaExtre
 
     spineDeviations = [np.linalg.norm(projSpinePoint[n] - spinePoints[n]) for n in range(0, len(spinePoints - 1))]
 
-    if (max(rowDelta) < eps_STEP_AP21) and (max(spineDeviations) < eps_STEP_AP21): # rotSymLimit constant --------------------------------------------
-        #ParsedSurface['rotSymFlag'] = 1
+    if (max(rowDelta) < eps_STEP_AP21) and (
+            max(spineDeviations) < eps_STEP_AP21):  # rotSymLimit constant --------------------------------------------
+        # ParsedSurface['rotSymFlag'] = 1
         ParsedSurface['rotSymFeature'] = dict()
-        #ParsedSurface['rotSymFeature']['rotSymCentre'] = ?? centroid minima within
+        # ParsedSurface['rotSymFeature']['rotSymCentre'] = ?? centroid minima within
         ParsedSurface['rotSymFeature']['rotSymRadius'] = spinePointsMean
 
     AFS['ParsedSurface'] = ParsedSurface
 
 
 def planeSurfaceParse_2(AFS, localCentroid, minimaExtrema=False):
+    '''
+    Parse a planar surface, optionally extract surface minima points relative to a
+    local centroid point.
+    minimaExtrema flag, exit function without expensive minima calculations (used during centroid iteration)
+
+    :param AFS: parsed surface data object
+    :param localCentroid: estimated surface median point based on extrema points identified
+    :param minimaExtrema: bool additional calculation to determine surface extrema
+    :return ParsedSurface object
+    '''
+
+    # STEP ISO 10303-42 notes, EXPRESS descriptor
     # ENTITY Plane
     #   SUBTYPE OF (Surface);
     #   position : Axis_placement_3d;
@@ -5465,16 +4781,16 @@ def planeSurfaceParse_2(AFS, localCentroid, minimaExtrema=False):
     # with a planar surface, closest point is that point closest to orthogonal intersection of ray through
     # localCentroid with plane of surface
 
-    if AFS.get('ParsedSurface') is not None: # recalculation of max/min
+    if AFS.get('ParsedSurface') is not None:  # recalculation of max/min
         ParsedSurface = AFS['ParsedSurface']
         axisPoint = ParsedSurface['axisPoint']
-        normDir = ParsedSurface['normDir'] # Z
-        #refDir = ParsedSurface['refDir'] # X
-        #auxDir = ParsedSurface['auxDir']  # Y
+        normDir = ParsedSurface['normDir']  # Z
+        # refDir = ParsedSurface['refDir'] # X
+        # auxDir = ParsedSurface['auxDir']  # Y
 
     else:
         ParsedSurface = {}
-        axisPoint, normDir, refDir = axis2Placement3D_2(AFS['SurfaceParams'][1], STEP_entities)
+        axisPoint, normDir, refDir = axis2Placement3D(AFS['SurfaceParams'][STEPlabelOffset(1, AFS['SurfaceParams'])], STEP_entities)
         ParsedSurface['axisPoint'] = axisPoint
         ParsedSurface['normDir'] = normDir  # Z
         ParsedSurface['refDir'] = refDir  # X
@@ -5497,23 +4813,42 @@ def planeSurfaceParse_2(AFS, localCentroid, minimaExtrema=False):
         # replace not append on every calculation
         ParsedSurface['pointFeature']['xyz'] = [surfaceMinPoint]
         ParsedSurface['pointFeature']['centroidDisp'] = [np.linalg.norm(surfaceMinPoint - localCentroid)]
-        ParsedSurface['pointFeature']['maxima'] = [False,]
-        ParsedSurface['pointFeature']['minima'] = [True,]
+        ParsedSurface['pointFeature']['maxima'] = [False, ]
+        ParsedSurface['pointFeature']['minima'] = [True, ]
 
     AFS['ParsedSurface'] = ParsedSurface
 
 
 def surfaceParse(AFS, c, STEP_entities, minimaExtrema=True):
+    '''
+    Process surface parsing according to STEP shape type
+    minimaExtrema flag, exit function without expensive minima calculations (used during centroid iteration)
+
+    :param AFS: parsed surface data object
+    :param c: estimated surface median point based on extrema points identified
+    :param minimaExtrema: bool additional calculation to determine surface extrema
+    :return ParsedSurface object
+    '''
+
     if AFS['SurfaceTypeName'] not in [
         'SPHERICAL_SURFACE',
         'TOROIDAL_SURFACE',
         'CYLINDRICAL_SURFACE',
         'CONICAL_SURFACE',
         'PLANE',
-        'B_SPLINE_SURFACE_WITH_KNOTS'
+        'B_SPLINE_SURFACE_WITH_KNOTS',
+        'SURFACE_OF_REVOLUTION',
+        'BOUNDED_SURFACE'
     ]:
         print("Untreated surface type: " + AFS['SurfaceTypeName'])
+        # SURFACE_OF_REVOLUTION
     else:
+        if AFS['SurfaceTypeName'] == 'BOUNDED_SURFACE':
+            boundedSurface(AFS, c, minimaExtrema)
+
+        if AFS['SurfaceTypeName'] == 'SURFACE_OF_REVOLUTION':
+            revolvedSurfaceParse(AFS, c, minimaExtrema)
+
         if AFS['SurfaceTypeName'] == 'SPHERICAL_SURFACE':
             sphereSurfaceParse(AFS, c, minimaExtrema)
 
@@ -5523,7 +4858,7 @@ def surfaceParse(AFS, c, STEP_entities, minimaExtrema=True):
         if (AFS['SurfaceTypeName'] == 'CYLINDRICAL_SURFACE'):
             cylinderSurfaceParse(AFS, c, minimaExtrema)
 
-        if (AFS['SurfaceTypeName'] == 'CONICAL_SURFACE'): # still must test with simple STEP file
+        if (AFS['SurfaceTypeName'] == 'CONICAL_SURFACE'):  # still must test with simple STEP file
             coneSurfaceParse(AFS, c, minimaExtrema)
 
         if AFS['SurfaceTypeName'] == 'PLANE':
@@ -5533,6 +4868,7 @@ def surfaceParse(AFS, c, STEP_entities, minimaExtrema=True):
             BSplineSurfaceWithKnotsParse(AFS, c, STEP_entities, minimaExtrema)
 
 
+# get STEP surface instances and associated edges, parse within AdvancedFaceSurfaces list of features
 AdvancedFaceSurfaces = []
 for se in STEP_entities:
     if hasattr(se, 'type_name'):  # stepcode.Part21.ComplexEntity type missing attribute
@@ -5546,10 +4882,11 @@ for se in STEP_entities:
                 'SurfaceParams': None,
                 'EdgeLoopList': [],
             }
-            for se2 in afRefs:
-                if hasattr(STEP_entities[ref2index(se2)], 'type_name'): # should prolly assume [0] is FACE_*-----------------<<<<<<
+            for se2 in afRefs: # should prolly assume [0] is FACE_*-----------------<<<<<<
+                if hasattr(STEP_entities[ref2index(se2)], 'type_name'):
                     afTypeName = STEP_entities[ref2index(se2)].type_name
-                    if (afTypeName == 'FACE_OUTER_BOUND') or (afTypeName == 'FACE_BOUND'):  # no risk of complex entities from here on in
+                    # no risk of complex entities from here on in
+                    if (afTypeName == 'FACE_OUTER_BOUND') or ( afTypeName == 'FACE_BOUND'):
                         # todo assume 'FACE_INNER_BOUND' or 'HOLE' etc can run the same edge loop from here ----------------------<<<<<<
                         se3 = STEP_entities[ref2index(se2)].params
                         se3 = cleanSubRefs(se3)[0]
@@ -5563,54 +4900,48 @@ for se in STEP_entities:
                             ref2index(se2)
                         ].params
 
-                elif not hasattr(STEP_entities[ref2index(se2)], 'type_name'):
-                    print('complex entity @todo')
+                elif not hasattr(STEP_entities[ref2index(se2)], 'type_name'): # complex entity
+
+                    # several different flavours of complex entity - need a disambiguation function
+                    # complex entity as a subset of advanced face surfaces
+                    if STEP_entities[ref2index(se2)].params[0].type_name == 'BOUNDED_SURFACE':
+                        #complexEntityParse(ref2index(se2), STEP_entities)
+                        SurfaceClass['SurfaceTypeName'] = STEP_entities[ref2index(se2)].params[0].type_name
+                        SurfaceClass['SurfaceRef'] = se2
+                    else:
+                        print('unhandled complex entity @todo')
             AdvancedFaceSurfaces.append(SurfaceClass)
 
-# axis: the Direction that defines the second axis of the Axis_placement. The value of this attribute need not be specified.
-# ref_direction: the direction used to determine the direction of the local X axis.
-# The value of this attribute need not be specified. If axis or ref_direction is omitted, these directions are taken from the geometric coordinate system
 
-# orientation: a BOOLEAN flag. If TRUE, the topological orientation as used coincides with the orientation,
-# from start vertex to end vertex, of the edge_definition, if FALSE the vertices are reversed in order.
-# edge_start: the start vertex of the Oriented_edge. This is derived from the vertices of the edge_definition after taking account of the orientation.
-# edge_end: the end vertex of the Oriented_edge. This is derived from the vertices of the edge_definition after taking account of the orientation.
-
-# extract edge data and convert into useful format
-
-#
-#10 = ADVANCED_BREP_SHAPE_REPRESENTATION('',(#11,#15),#113);
-#11 = AXIS2_PLACEMENT_3D('',#12,#13,#14);
-#12 = CARTESIAN_POINT('',(0.,0.,0.));
-#13 = DIRECTION('',(0.,0.,1.));
-#14 = DIRECTION('',(1.,0.,-0.));
+# get convex hull points of model in order to determine a reliable median centroid
 
 outermostPoints = []
-# need to exclude Advanced_brep_shape_representation which seems to contain a [0,0,0] origin point
+# exclude Advanced_brep_shape_representation which contains a [0,0,0] origin point, e.g.
+# 10 = ADVANCED_BREP_SHAPE_REPRESENTATION('',(#11,#15),#113);
+# 11 = AXIS2_PLACEMENT_3D('',#12,#13,#14);
+# 12 = CARTESIAN_POINT('',(0.,0.,0.));
+# 13 = DIRECTION('',(0.,0.,1.));
+# 14 = DIRECTION('',(1.,0.,-0.));
+
 ABSRpointRef = None
 for ABSR in STEP_entities:
     if hasattr(ABSR, 'type_name'):  # stepcode.Part21.ComplexEntity type missing attribute
         if ABSR.type_name == 'ADVANCED_BREP_SHAPE_REPRESENTATION':
-            # get
             cleanABSR = cleanSubRefs(ABSR.params)
             if STEP_entities[ref2index(cleanABSR[0])].type_name == 'AXIS2_PLACEMENT_3D':
                 ABSRpointRef = cleanSubRefs(STEP_entities[ref2index(cleanABSR[0])].params)[0]
-                #_1=1
-
 
     for vp in STEP_entities:
         if hasattr(vp, 'type_name'):  # stepcode.Part21.ComplexEntity type missing attribute
             if vp.type_name == 'CARTESIAN_POINT':
                 if (len(vp.params[-1]) == 3):
                     if (vp.ref == ABSRpointRef):
+                        #print(" unresolved ComplexEntity type attribute")
                         pass
                     else:
                         outermostPoints.append(np.array([vp.params[-1][0], vp.params[-1][1], vp.params[-1][2]]))
 
 
-
-            #
-#
 centroid = medianPoint(outermostPoints)
 # continue to ignore local maxima at both radial extents and NURB surface maxima?
 # for all elements, surfaces and bounding edges, iterate maxima discovery relative to centroid
@@ -5631,61 +4962,56 @@ for AFS in AdvancedFaceSurfaces:
         # if ParsedEdge['vertex1ref'] == ParsedEdge['vertex2ref']:
         #     _1=1
 
-        if ParsedEdge['typeName'] in ['SEAM_CURVE', 'SURFACE_CURVE']:
-            #   SEAM_CURVE (not sure if this is worthwhile retaining)
-            #   associated geometry in following list does not seem to be defined elsewhere
-
-            #   Attribute	                Type	                                        Defined By
-            #   name	                    label (STRING)	                                representation_item
-            #   curve_3d	                curve (ENTITY)	                                surface_curve
-            #   associated_geometry	        LIST OF pcurve_or_surface (SELECT)	            surface_curve
-            #   master_representation	    preferred_surface_curve_representation (ENUM)	surface_curve
-
-            # todo: just create a superTypeName flag?
-
-            cleanEdgeType = cleanSubRefs(ParsedEdge['edgeType'])
-            edgeTypeName = STEP_entities[ref2index(cleanEdgeType[0])].type_name
-            ParsedEdge['superTypeName'] = ParsedEdge['typeName']
-
-            edgeRef = STEP_entities[ref2index(cleanEdgeType[0])].ref
-
-            # if edgeRef == '#16':
-            #     _1=1
-
-            ParsedEdge['superEdgeRef'] = ParsedEdge['edgeRef']
-            ParsedEdge['edgeRef'] = edgeRef
-            ParsedEdge['superEdgeType'] = ParsedEdge['edgeType']
-            ParsedEdge['edgeType'] = STEP_entities[ref2index(cleanEdgeType[0])].params # todo: change edgeParams
-            ParsedEdge['superTypeName'] = ParsedEdge['typeName']
-            ParsedEdge['typeName'] = STEP_entities[ref2index(edgeRef)].type_name
-            edgeParse(centroid, ParsedEdge, STEP_entities)
-
-            if ParsedEdge['edgeRef'] not in [pel['edgeRef'] for pel in ParsedEdgeLoop]:
-                ParsedEdgeLoop.append(ParsedEdge)
-
-            for cet in cleanEdgeType[1:]: # get associated surfaces, LIST OF pcurve_or_surface
-                if STEP_entities[ref2index(cet)].type_name == 'PCURVE':
-                    # extract surface data from second parameter term
-                    surfaceRef = STEP_entities[ref2index(cet)].params[1]
-
-                    # todo:  shouldn't recalculate on every pass?
-                    # todo:  create function collateField(surface?) to .. dict data
-
-                    # surfaceRefCollection = []
-                    # for AFS2 in AdvancedFaceSurfaces:
-                    #     surfaceRefCollection.append(AFS2['SurfaceRef'])
-                    # if surfaceRef not in surfaceRefCollection:
-                    if surfaceRef not in [AFS2['SurfaceRef'] for AFS2 in AdvancedFaceSurfaces]:
-                        _1=1
-                        print('undetected surface! PCURVE')
-                else:
-                    # todo: code for other surface option missing
-                    print('undetermined surfacetype failure line2824')
-                    _1 = 1
+        # # todo move to edgeParse
+        # if ParsedEdge['typeName'] in ['SEAM_CURVE', 'SURFACE_CURVE']:
+        #     #   SEAM_CURVE (not sure if this is worthwhile retaining)
+        #     #   associated geometry in following list does not seem to be defined elsewhere
+        #
+        #     #   Attribute	                Type	                                        Defined By
+        #     #   name	                    label (STRING)	                                representation_item
+        #     #   curve_3d	                curve (ENTITY)	                                surface_curve
+        #     #   associated_geometry	        LIST OF pcurve_or_surface (SELECT)	            surface_curve
+        #     #   master_representation	    preferred_surface_curve_representation (ENUM)	surface_curve
+        #
+        #     # todo: just create a superTypeName flag?
+        #
+        #     cleanEdgeParams = cleanSubRefs(ParsedEdge['edgeParams'])
+        #     edgeParamsName = STEP_entities[ref2index(cleanEdgeParams[0])].type_name
+        #     ParsedEdge['superTypeName'] = ParsedEdge['typeName']
+        #
+        #     edgeRef = STEP_entities[ref2index(cleanEdgeParams[0])].ref
+        #
+        #     ParsedEdge['superEdgeRef'] = ParsedEdge['edgeRef']
+        #     ParsedEdge['edgeRef'] = edgeRef
+        #     ParsedEdge['superEdgeParams'] = ParsedEdge['edgeParams']
+        #     ParsedEdge['edgeParams'] = STEP_entities[ref2index(cleanEdgeParams[0])].params  # todo: change edgeParams
+        #     ParsedEdge['superTypeName'] = ParsedEdge['typeName']
+        #     ParsedEdge['typeName'] = STEP_entities[ref2index(edgeRef)].type_name
+        #     edgeParse(centroid, ParsedEdge, STEP_entities)
+        #
+        #     if ParsedEdge['edgeRef'] not in [pel['edgeRef'] for pel in ParsedEdgeLoop]:
+        #         ParsedEdgeLoop.append(ParsedEdge)
+        #
+        #     for cet in cleanEdgeParams[1:]:  # get associated surfaces, LIST OF pcurve_or_surface
+        #         if STEP_entities[ref2index(cet)].type_name == 'PCURVE':
+        #             # extract surface data from second parameter term
+        #             surfaceRef = STEP_entities[ref2index(cet)].params[1]
+        #
+        #             # surfaceRefCollection = []
+        #             # for AFS2 in AdvancedFaceSurfaces:
+        #             #     surfaceRefCollection.append(AFS2['SurfaceRef'])
+        #             # if surfaceRef not in surfaceRefCollection:
+        #             if surfaceRef not in [AFS2['SurfaceRef'] for AFS2 in AdvancedFaceSurfaces]:
+        #                 _1 = 1
+        #                 print('undetected surface! PCURVE')
+        #         else:
+        #             # todo: code for other surface option missing
+        #             print('undetermined surfacetype failure line2824')
+        #             _1 = 1
 
     AFS['outerBoundEdgeLoop'] = ParsedEdgeLoop
-    # doesn't seem much point in parsing surface minima until centroid is stable
-    surfaceParse(AFS, centroid, STEP_entities)
+    # don't parse surface minima until centroid is stable
+    surfaceParse(AFS, centroid, STEP_entities, minimaExtrema=False)
 
     # The standard CSG primitives are the cone, eccentric_cone, cylinder, sphere, torus,
     # block, right_angular_wedge, ellipsoid, tetrahedron and pyramid.
@@ -5694,76 +5020,59 @@ for AFS in AdvancedFaceSurfaces:
     #        b_spline_surface_with_knots,
     #        bezier_surface,
     #        conical_surface,
-    #        curve_bounded_surface,
+
+    ###        curve_bounded_surface,
+
     #        cylindrical_surface,
-    #        degenerate_toroidal_surface,
-    #        offset_surface,
-    #        quasi_uniform_surface,
+    ###        degenerate_toroidal_surface,
+    ###        offset_surface,
+    ###        quasi_uniform_surface,
     #        rational_b_spline_surface,
-    #        rectangular_composite_surface,
+    ###        rectangular_composite_surface,
     #        rectangular_trimmed_surface,
     #        spherical_surface,
     #        surface,
-    #        surface_of_linear_extrusion,
+    ###        surface_of_linear_extrusion,
     #        surface_of_revolution,
-    #        surface_replica,
-    #        swept_surface,
+    ###        surface_replica,
+    ###        swept_surface,
     #        toroidal_surface,
-    #        uniform_surface,
+    ###        uniform_surface,
+
 
 # iteratively calculate max/min points and median centroid point
 # extract max values for all surfaces to add to median vertex calculation for centroid
-
-def medianOfFeaturePoints(Surfaces):
-    """get barycentre of all AFS feature points"""
-
-    outermostPoints = []
-
-    for AFS in Surfaces:
-        if AFS['ParsedSurface'].get('pointFeature') is not None:
-            if AFS['ParsedSurface']['pointFeature'].get('xyz') is not None:
-                [outermostPoints.append(mp) for mp in AFS['ParsedSurface']['pointFeature']['xyz']]
-        # if AFS['ParsedSurface'].get('axisPoint') is not None:
-        #     outermostPoints.append(AFS['ParsedSurface']['axisPoint'])
-            # print('AFS[ParsedSurface][axisPoint]')
-            # print(AFS['ParsedSurface']['axisPoint'])
-        for edge in AFS['outerBoundEdgeLoop']:
-            if edge.get('pointFeature') is not None:
-                if edge['pointFeature'].get('xyz') is not None:
-                    [outermostPoints.append(mp) for mp in edge['pointFeature']['xyz']]
-            # if edge.get('axisPoint') is not None:
-            #     outermostPoints.append(edge['axisPoint'])
-                # print('axisPoint')
-                # print(edge['axisPoint'])
-
-    return medianPoint(outermostPoints)
-
 lastCentroid = centroid
 centroid = medianOfFeaturePoints(AdvancedFaceSurfaces)
+if len(centroid) == 3:
+    # iterate centroid-features relationship
+    while (np.linalg.norm(lastCentroid - centroid) > eps):
+        # recalculate surfaces & edges max/min points according to new centroid
+        for AFS in AdvancedFaceSurfaces:
+            # update surface after edges
+            for edge in AFS['outerBoundEdgeLoop']:
+                edgeParse(centroid, edge, STEP_entities)
+            # doesn't seem much point in parsing surface minima until centroid is stable, possible exception of bspline maxima, minimaFlag ?
+            surfaceParse(AFS, centroid, STEP_entities, minimaExtrema=False)
 
-# iterate centroid-features relationship
-while (np.linalg.norm(lastCentroid - centroid) > eps):
-    # recalculate surfaces & edges max/min points according to new centroid
-    for AFS in AdvancedFaceSurfaces:
-        # update surface after edges
-        for edge in AFS['outerBoundEdgeLoop']:
-            edgeParse(centroid, edge, STEP_entities)
-        # doesn't seem much point in parsing surface minima until centroid is stable, possible exception of bspline maxima, minimaFlag ?
-        surfaceParse(AFS, centroid, STEP_entities, minimaExtrema=False)
+        lastCentroid = centroid
+        centroid = medianOfFeaturePoints(AdvancedFaceSurfaces)
+        # for AFS in AdvancedFaceSurfaces:
+        #     if AFS['ParsedSurface']['maxPoint'] is not None:
+        #         outermostPoints.append(AFS['ParsedSurface']['maxPoint'])
+        #         for edge in AFS['outerBoundEdgeLoop']:
+        #             outermostPoints.append(edge['maxPoint'])
+        #
+        # centroid = medianPoint(outermostPoints)
+        print('centroid update: ' + str(np.linalg.norm(lastCentroid - centroid)))
+        print('centroid: ' + str(centroid))
+else:
+    # case of no surfaces
+    centroid = lastCentroid
 
-    lastCentroid = centroid
-    centroid = medianOfFeaturePoints(AdvancedFaceSurfaces)
-    # for AFS in AdvancedFaceSurfaces:
-    #     if AFS['ParsedSurface']['maxPoint'] is not None:
-    #         outermostPoints.append(AFS['ParsedSurface']['maxPoint'])
-    #         for edge in AFS['outerBoundEdgeLoop']:
-    #             outermostPoints.append(edge['maxPoint'])
-    #
-    # centroid = medianPoint(outermostPoints)
-    print('centroid update: ' + str(np.linalg.norm(lastCentroid - centroid)))
-    print('centroid: ' + str(centroid))
+for AFS in AdvancedFaceSurfaces:
+    surfaceParse(AFS, centroid, STEP_entities, minimaExtrema=True)
 
-surfaceParse(AFS, centroid, STEP_entities, minimaExtrema=True)
 
 # todo: search for all edges & surfaces related to point features (maybe symmetrical arcs too) get nearest points
 # to originating points
@@ -5771,17 +5080,7 @@ surfaceParse(AFS, centroid, STEP_entities, minimaExtrema=True)
 # where the surface or edge is of a fixed radius from the local centroid.
 
 
-def FreeCADpointSyntax(A, color=(0., 0., 0.)):
-    '''print the instructions to create a FreeCAD model of a list of points'''
-    print('import FreeCAD as App')
-    print('import Draft')
-    for i, xyz in enumerate(A):
-        print('P{:} = Draft.make_point( {:1.8f}, {:1.8f}, {:1.8f}, color=({:1.8f}, {:1.8f}, {:1.8f}))'.format(i, xyz[0], xyz[1], xyz[2], color[0], color[1], color[2]))
-    print('App.ActiveDocument.recompute()')
-    #print('setview()')
-
-
-def parseAdjacentFeatures(AFS): #getNearestFeatures(sourceRef, parsedFaceSet):
+def parseAdjacentFeatures(AFS):  # getNearestFeatures(sourceRef, parsedFaceSet):
     """ given a STEP reference associated with a feature, find all associated objects (edges & surfaces) and return  """
     # seems there should be sets of associated references with every adjacent feature??
     # only vertex points have associated Ref
@@ -5791,38 +5090,22 @@ def parseAdjacentFeatures(AFS): #getNearestFeatures(sourceRef, parsedFaceSet):
     # max/min @ edge: return vertex1 & 2 plus touching surfaces
     # max/min @ surface: return surface & its edges & vertices
 
-    # if bspline surface won't return a maxima at an edge, is this required
-    # # create set of edges to every surface
-    # for afs in AFS:
-    #     afs['ParsedSurface']['surfaceEdgeIndex'] = []
-    #     for se in afs['outerBoundEdgeLoop']:
-    #         afs['ParsedSurface']['surfaceEdgeIndex'].append(se['edgeRef'])
-
-    # # create set of surface to every edges
-    # for afs in AFS:
-    #     for se in afs['outerBoundEdgeLoop']:
-    #         se['edgeAdjSurfacesIndex'] = {}
-    #         for afs2_index, afs2 in enumerate(AFS):
-    #             for te in afs2['outerBoundEdgeLoop']:
-    #                 if se['edgeRef'] == te['edgeRef']:
-    #                     if afs2['SurfaceRef'] not in se['edgeAdjSurfacesIndex'].keys():
-    #                         se['edgeAdjSurfacesIndex'][afs2['SurfaceRef']] = afs2_index
 
     for afs_index, afs in enumerate(AFS):
         for se_index, se in enumerate(afs['outerBoundEdgeLoop']):
             for sRef in ['vertex1ref', 'vertex2ref']:
                 if se.get(sRef):
                     ref1 = se[sRef]
-                    #indexDictName = sRef + '_' + ref1 + '_featuresIndex'
+                    # indexDictName = sRef + '_' + ref1 + '_featuresIndex'
                     indexDictName = sRef + '_surroundIndex'
                     se[indexDictName] = {}
-                    #se[indexDictName][ref1] = (afs_index, se_index)================================================================
+                    # se[indexDictName][ref1] = (afs_index, se_index)================================================================
                     for afs2_index, afs2 in enumerate(AFS):
                         for te_index, te in enumerate(afs2['outerBoundEdgeLoop']):
                             te_strings = [et for et in te.values() if type(et) == str]
                             if ref1 in te_strings:  #
                                 # add adjacent surfaces unnecessary as these are the first field of feature mapping
-                                #for tRef in ['vertex1ref', 'vertex2ref']:#, 'edgeRef']:
+                                # for tRef in ['vertex1ref', 'vertex2ref']:#, 'edgeRef']:
                                 for tRef in ['edgeRef']:
                                     if te.get(tRef):
                                         ref2 = te[tRef]
@@ -5830,100 +5113,69 @@ def parseAdjacentFeatures(AFS): #getNearestFeatures(sourceRef, parsedFaceSet):
                                             se[indexDictName][ref2] = (afs2_index, te_index)
 
 
-
-    # def mapFeatureRefs(sourceFeatureRefs, targetFeatureRefs, AFS):
-    #     for afs in AFS:
-    #         for edgeSource in afs['outerBoundEdgeLoop']:
-    #             for sourceRef in sourceFeatureRefs:
-    #                 if edgeSource.get(sourceRef):
-    #                     ref1 = edgeSource[sourceRef]
-    #                     indexDictName = sourceRef + '_' + ref1 + '_featuresIndex'
-    #                     edgeSource[indexDictName] = {}
-    #                     for afs2_index, afs2 in enumerate(AFS):
-    #                         for edgeTargetIndex, edgeTarget in enumerate(afs2['outerBoundEdgeLoop']):
-    #                             edgeTargetStrings = [et for et in edgeTarget.values() if type(et) == str]
-    #                             if ref1 in edgeTargetStrings: #
-    #                                 # add adjacent surfaces unnecessary as these are teh first field of feature mapping
-    #                                 for targetRef in targetFeatureRefs:
-    #                                     if edgeTarget.get(targetRef):
-    #                                         ref2 = edgeTarget[targetRef]
-    #                                         if (ref2 != ref1):# and ref2 not in edgeSource[indexDictName].keys():
-    #                                                 edgeSource[indexDictName][ref2] = (afs2_index, edgeTargetIndex)
-
-    #mapFeatureRefs(['vertex1ref', 'vertex2ref', ], ['vertex1ref', 'vertex2ref', 'edgeRef'], AFS)
-    #mapFeatureRefs(['vertex1ref','vertex2ref',],['vertex1ref','vertex2ref','edgeRef'], AFS)
-    #mapFeatureRefs(['vertex2ref',], ['edgeRef'], AFS)
-    #mapFeatureRefs(['vertex1ref', ], ['vertex2ref'], AFS)
-    #pass
-
     # instead of all purpose function, need to find sets of edges at a common vertex
     # (alongside set of vertices on all edges common to any one vertex)
     # sets of surfaces at a common vertex (do not exclude common ref (s, e) in search)
     # intersection of two surface sets to find common surfaces adjacent to common edge
 
 
-parseAdjacentFeatures(AdvancedFaceSurfaces)
-
-
-# rank rotationally symmetric edges as grooves/spherical/ridges based on adjoining surfaces
-# namely for the 2 surfaces adjoining an arc/circle, measure the displacement of the surface relative to this axis of rotation
-# project each point on adjoining surfaces to rotational axis to determine average displacement
-# Limit to adjoining surfaces to determine the extent of relevant points and edges on each side
-# (not check edges completely enclose rotational axis)
-# average the displacement to this axis of vertices & edges
-
-# test models: Maltese Cruciform
-# import FreeCAD as App
-# import Part
-# v = App.Vector
-# doc = App.newDocument()
-#
-# p0 = v(0,0,-20)
-# p1 = v(10,0,-20)
-# p2 = v(8,0,-10)
-# p3 = v(5,0,0)
-# p4 = v(8,0,10)
-# p5 = v(10,0,20)
-# p6 = v(0,0,20)
-#
-# L0=Part.makePolygon([p0, p1, p2, p3, p4, p5, p6])
-# S0=L0.revolve(App.Vector(0,0,0),App.Vector(0,0,1),360)
-# # Part.show(S0, "Surface")
-#
-# p7 = v(-20,0,0)
-# p8 = v(-20,10,0)
-# p9 = v(-10,8,0)
-# p10 = v(0,5,0)
-# p11 = v(10,8,0)
-# p12 = v(20,10,0)
-# p13 = v(20,0,0)
-#
-# L1=Part.makePolygon([p7, p8, p9, p10, p11, p12, p13])
-# S1=L1.revolve(App.Vector(0,0,0),App.Vector(1,0,0),360)
-# # Part.show(S1, "Surface")
-#
-# fusedX = S0.fuse(S1)
-# Part.show(fusedX, "Surface")
-
-# rather than searching for all features around a rotSym feature, restrict to rotSym features?
-# recall that distinction between geometric surfaces is determinined by the most simple shapes permissible.
-# note that features must be tested to determine they are on the same axis.
-# multiple data sets created for multiple axes through centroid (e.g. sea-urchin shape, or throwing jacks)
-
-
-#import pickle
-# p_file = open('AFS_cruciform.pkl', 'wb')
-# pickle.dump(AdvancedFaceSurfaces, p_file)
-# p_file.close()
-
-# f = open('AFS_cruciform.pkl','rb')
-# AdvancedFaceSurfaces = pickle.load(f)
-
-
 def getRotSymFeatures(AFS):
     '''
     order rotational features to return unique rotSym features
     '''
+
+    # rank rotationally symmetric edges as grooves/spherical/ridges based on adjoining surfaces
+    # namely for the 2 surfaces adjoining an arc/circle, measure the displacement of the surface relative to this axis of rotation
+    # project each point on adjoining surfaces to rotational axis to determine average displacement
+    # Limit to adjoining surfaces to determine the extent of relevant points and edges on each side
+    # (not check edges completely enclose rotational axis)
+    # average the displacement to this axis of vertices & edges
+
+    # test models: Maltese Cruciform
+    # import FreeCAD as App
+    # import Part
+    # v = App.Vector
+    # doc = App.newDocument()
+    #
+    # p0 = v(0,0,-20)
+    # p1 = v(10,0,-20)
+    # p2 = v(8,0,-10)
+    # p3 = v(5,0,0)
+    # p4 = v(8,0,10)
+    # p5 = v(10,0,20)
+    # p6 = v(0,0,20)
+    #
+    # L0=Part.makePolygon([p0, p1, p2, p3, p4, p5, p6])
+    # S0=L0.revolve(App.Vector(0,0,0),App.Vector(0,0,1),360)
+    # # Part.show(S0, "Surface")
+    #
+    # p7 = v(-20,0,0)
+    # p8 = v(-20,10,0)
+    # p9 = v(-10,8,0)
+    # p10 = v(0,5,0)
+    # p11 = v(10,8,0)
+    # p12 = v(20,10,0)
+    # p13 = v(20,0,0)
+    #
+    # L1=Part.makePolygon([p7, p8, p9, p10, p11, p12, p13])
+    # S1=L1.revolve(App.Vector(0,0,0),App.Vector(1,0,0),360)
+    # # Part.show(S1, "Surface")
+    #
+    # fusedX = S0.fuse(S1)
+    # Part.show(fusedX, "Surface")
+
+    # rather than searching for all features around a rotSym feature, restrict to rotSym features
+    # recall that distinction between geometric surfaces is determinined by the most simple shapes permissible.
+    # note that features must be tested to determine they are on the same axis.
+    # multiple data sets created for multiple axes through centroid (e.g. sea-urchin shape, or throwing jacks)
+
+    # import pickle
+    # p_file = open('AFS_cruciform.pkl', 'wb')
+    # pickle.dump(AdvancedFaceSurfaces, p_file)
+    # p_file.close()
+
+    # f = open('AFS_cruciform.pkl','rb')
+    # AdvancedFaceSurfaces = pickle.load(f)
 
     allRotSymFeatures = dict()
     allRotSymFeatures['rotSymCentre'] = []
@@ -6055,22 +5307,11 @@ def getRotSymFeatures(AFS):
 # surface maxima/minima may be associated with related edge maxima/minima (note B-spline surface may have several max/min)
 # find the minima/maxima associated with every edge
 
-rotSymFeatures = getRotSymFeatures(AdvancedFaceSurfaces)
 
 
-surfaceMinPoint = []
-surfaceMinFeatureCentroidDisp = []
-# surfaceMinRotSym = []
-
-surfaceMaxPoint = []
-surfaceMaxFeatureCentroidDisp = []
-# surfaceMaxRotSym = []
-
-# surfaceSphericalRotSym = []
-
-def getPointFeatures(AdvancedFaceSurface):
+def getPointFeatures(AdvancedFaceSurfaces):
     '''
-    order point features to return unique
+    order point features to return unique points and characteristics
     '''
 
     def vertexExtremaSearch(AdvancedFaceSurfaces, extremaType='maxima'):
@@ -6084,8 +5325,7 @@ def getPointFeatures(AdvancedFaceSurface):
         vertexX = ['vertex1', 'vertex2']
         vertexXref = ['vertex1ref', 'vertex2ref']
         vertexXref_surroundIndex = ['vertex1ref_surroundIndex', 'vertex2ref_surroundIndex']
-        # extremaType = 'maxima'
-        # extremaType = 'minima'
+
         extrema = dict()
         for v in range(0, 2):  # vertex1, vertex2
             for AFSindex, AFS in enumerate(AdvancedFaceSurfaces):
@@ -6119,7 +5359,8 @@ def getPointFeatures(AdvancedFaceSurface):
                             adjacentEdgeRefs.append(vseRef)
                             vse = edge[vertexXref_surroundIndex[v]][vseRef]
                             adjPF = AdvancedFaceSurfaces[vse[0]]['outerBoundEdgeLoop'][vse[1]]['pointFeature']
-                            if AdvancedFaceSurfaces[vse[0]]['outerBoundEdgeLoop'][vse[1]][vertexXref[v]] == edge[vertexXref[v]]:
+                            if AdvancedFaceSurfaces[vse[0]]['outerBoundEdgeLoop'][vse[1]][vertexXref[v]] == edge[
+                                vertexXref[v]]:
                                 pfSurround.append(adjPF)
                                 reversedOrder.append(False)
                             else:
@@ -6127,6 +5368,8 @@ def getPointFeatures(AdvancedFaceSurface):
                                 reversePF['u'] = adjPF['u'].copy()
                                 reversePF['u'].reverse()
                                 reversePF['xyz'] = adjPF['xyz'].copy()
+                                if not isinstance(reversePF['xyz'], list):
+                                    _1=1
                                 reversePF['xyz'].reverse()
                                 reversePF['centroidDisp'] = adjPF['centroidDisp'].copy()
                                 reversePF['centroidDisp'].reverse()
@@ -6135,7 +5378,8 @@ def getPointFeatures(AdvancedFaceSurface):
 
                         # test vertexX with immediate neighbours
                         if extremaType == 'maxima':
-                            if all([pfs['centroidDisp'][0] > pfs['centroidDisp'][1] + eps_STEP_AP21 for pfs in pfSurround]):
+                            if all([pfs['centroidDisp'][0] > pfs['centroidDisp'][1] + eps_STEP_AP21 for pfs in
+                                    pfSurround]):
                                 if not array3x1match(edge[vertexX[v]], pointFeatures['xyz']):
                                     pointFeatures['xyz'].append(edge[vertexX[v]])
                                     pointFeatures['centroidDisp'].append(pfSurround[0]['centroidDisp'][0])
@@ -6143,7 +5387,8 @@ def getPointFeatures(AdvancedFaceSurface):
                                     pointFeatures['minima'].append(False)
 
                         elif extremaType == 'minima':
-                            if all([pfs['centroidDisp'][0] < pfs['centroidDisp'][1] - eps_STEP_AP21 for pfs in pfSurround]):  # local min
+                            if all([pfs['centroidDisp'][0] < pfs['centroidDisp'][1] - eps_STEP_AP21 for pfs in
+                                    pfSurround]):  # local min
                                 if not array3x1match(edge[vertexX[v]], pointFeatures['xyz']):
                                     pointFeatures['xyz'].append(edge[vertexX[v]])
                                     pointFeatures['centroidDisp'].append(pfSurround[0]['centroidDisp'][0])
@@ -6156,7 +5401,8 @@ def getPointFeatures(AdvancedFaceSurface):
                             while crawlindex < maxPFlen:
                                 # should capture all local max/min before second vertex
                                 for pfsIndex, pfs in enumerate(pfSurround):
-                                    if crawlindex < len(pfs['centroidDisp']) - 1:  # 'centroidDisp' find local maxima/minima
+                                    # 'centroidDisp' find local maxima/minima
+                                    if crawlindex < len( pfs['centroidDisp']) - 1:
                                         pfcd0 = pfs['centroidDisp'][crawlindex - 1]
                                         pfcd1 = pfs['centroidDisp'][crawlindex]
                                         pfcd2 = pfs['centroidDisp'][crawlindex + 1]
@@ -6166,21 +5412,21 @@ def getPointFeatures(AdvancedFaceSurface):
                                         else:
                                             u = crawlindex
 
-                                        if extremaType == 'maxima':
-                                            if (pfcd1 > pfcd0 + eps_STEP_AP21) and (pfcd1 > pfcd2 + eps_STEP_AP21):  # local max
+                                        if extremaType == 'maxima':  # local max
+                                            if (pfcd1 > pfcd0 + eps_STEP_AP21) and (pfcd1 > pfcd2 + eps_STEP_AP21):
                                                 if not array3x1match(pfs['xyz'][u], pointFeatures['xyz']):
                                                     pointFeatures['xyz'].append(pfs['xyz'][u])
                                                     pointFeatures['centroidDisp'].append(pfcd1)
                                                     pointFeatures['maxima'].append(True)
                                                     pointFeatures['minima'].append(False)
 
-                                        elif extremaType == 'minima':
-                                            if (pfcd1 < pfcd0 - eps_STEP_AP21) and (pfcd1 < pfcd2 - eps_STEP_AP21):  # local min
+                                        elif extremaType == 'minima':  # local min
+                                            if (pfcd1 < pfcd0 - eps_STEP_AP21) and (pfcd1 < pfcd2 - eps_STEP_AP21):
                                                 if not array3x1match(pfs['xyz'][u], pointFeatures['xyz']):
                                                     pointFeatures['xyz'].append(pfs['xyz'][u])
                                                     pointFeatures['centroidDisp'].append(pfcd1)
-                                                    pointFeatures['maxima'].append(True)
-                                                    pointFeatures['minima'].append(False)
+                                                    pointFeatures['maxima'].append(False)
+                                                    pointFeatures['minima'].append(True)
 
                                 crawlindex += 1
         return pointFeatures
@@ -6188,135 +5434,118 @@ def getPointFeatures(AdvancedFaceSurface):
     maxPointFeatures = vertexExtremaSearch(AdvancedFaceSurfaces, extremaType='maxima')
     minPointFeatures = vertexExtremaSearch(AdvancedFaceSurfaces, extremaType='minima')
 
+    # surfacePointFeature = maxPointFeatures | minPointFeatures # > Python 3.9, requires explicit merge function prior to 3.4
+    surfacePointFeature = {**maxPointFeatures, **minPointFeatures}
 
-_1=1 # todo: looking for 'superTypeName', e.g TiltedCylinder.step
+    # should add surface point instances to min/maxPointFeatures here?
 
-vertexX = ['vertex1', 'vertex2']
-vertexXref = ['vertex1ref', 'vertex2ref']
-vertexXref_surroundIndex = ['vertex1ref_surroundIndex', 'vertex2ref_surroundIndex']
-extremaType = 'maxima'
-#extremaType = 'minima'
-#extremaXYZ = []
-extrema = dict()
-for v in range(0, 2): # vertex1, vertex2
-    for AFSindex, AFS in enumerate(AdvancedFaceSurfaces):
-        for edge in AFS['outerBoundEdgeLoop']:
-            if (edge.get('superTypeNameFlag') is not None):
-                if edge['superTypeName'] == 'SEAM_CURVE':  # exclude SEAM_CURVE data
-                    print("is this code reachable??")
-                    break
-                    # unnecessary?
+    # collate maxima minima extrema within all surfaces, note that local max/min implies that no global hierarchy is required
+    surfacePointFeature = dict()  # todo: this should become an initiated class
+    surfacePointFeature['xyz'] = []
+    surfacePointFeature['centroidDisp'] = []
+    surfacePointFeature['maxima'] = []
+    surfacePointFeature['minima'] = []
 
-            elif not edge.get('pointFeature'):
-                # commence with searching local minima around edges associated with AFS surface
-                # for each edge, get 'pointFeatures' fields
-                print("missing pointFeature field") # this should be checked elsewhere
-                break
+    for mpf in [maxPointFeatures, minPointFeatures]:
+        surfacePointFeature['xyz'] = surfacePointFeature['xyz'] + mpf['xyz']
+        surfacePointFeature['centroidDisp'] = surfacePointFeature['centroidDisp'] + mpf['centroidDisp']
+        surfacePointFeature['maxima'] = surfacePointFeature['maxima'] + mpf['maxima']
+        surfacePointFeature['minima'] = surfacePointFeature['minima'] + mpf['minima']
 
-            elif ((v==0) and (edge[vertexXref[v]] not in extrema.keys())) or ((v==1) and (edge[vertexXref[v]] not in extrema.keys())):
-                # get localMinima for all vertex and attached edges,
-                # retain extrema value in separate set, [surface]['outerBoundEdgeLoop'][edge]['pointFeature'][index]
-                # conduct championship knockout to find global extrema
+    surfaceSphericalFeature = dict()
+    surfaceSphericalFeature['rotSymCentre'] = []
+    surfaceSphericalFeature['rotSymRadius'] = []
 
-                # for each pointFeature element, get max/min
-                # for vertex1/2 find if relative max/min from adjacent pointFeature element - ignore surfaces for now
+    for AFS in AdvancedFaceSurfaces:
+        if (AFS.get('ParsedSurface') is not None):
+            # ['ParsedSurface']['pointFeature'] only covers internal features
+            for index_xyz, xyz in enumerate(AFS['ParsedSurface']['pointFeature']['xyz']):
+                if not array3x1match(xyz, surfacePointFeature['xyz']):
+                    surfacePointFeature['xyz'].append(xyz)
+                    surfacePointFeature['centroidDisp'].append(
+                        AFS['ParsedSurface']['pointFeature']['centroidDisp'][index_xyz])
+                    surfacePointFeature['maxima'].append(AFS['ParsedSurface']['pointFeature']['maxima'][index_xyz])
+                    surfacePointFeature['minima'].append(AFS['ParsedSurface']['pointFeature']['minima'][index_xyz])
 
-                #pfLocal = edge['pointFeature']
-                # u == 0, vertex1, get attached pointFeature
-                # surroundIndex should give address of adjacent edges
-                pfSurround = []
-                adjacentEdgeRefs = []
-                reversedOrder = []
-                for vseRef in edge[vertexXref_surroundIndex[v]].keys():
-                    adjacentEdgeRefs.append(vseRef)
-                    vse = edge[vertexXref_surroundIndex[v]][vseRef]
-                    adjPF = AdvancedFaceSurfaces[vse[0]]['outerBoundEdgeLoop'][vse[1]]['pointFeature']
-                    if AdvancedFaceSurfaces[vse[0]]['outerBoundEdgeLoop'][vse[1]][vertexXref[v]] == edge[vertexXref[v]]:
-                        pfSurround.append(adjPF)
-                        reversedOrder.append(False)
-                    else:
-                        reversePF = dict()
-                        reversePF['u'] = adjPF['u'].copy()
-                        reversePF['u'].reverse()
-                        reversePF['xyz'] = adjPF['xyz'].copy()
-                        reversePF['xyz'].reverse()
-                        reversePF['centroidDisp'] = adjPF['centroidDisp'].copy()
-                        reversePF['centroidDisp'].reverse()
-                        pfSurround.append(reversePF)
-                        reversedOrder.append(True)
+                # for OBE in AFS['outerBoundEdgeLoop']:
+                #     for index_OBExyz, OBExyz in enumerate(OBE['pointFeature']['xyz']):
+                #         if not array3x1match(OBExyz, surfacePointFeature['xyz']):
+                #             surfacePointFeature['xyz'].append(OBExyz)
+                #             surfacePointFeature['centroidDisp'].append(OBE['pointFeature']['centroidDisp'][index_OBExyz])
+                #             surfacePointFeature['maxima'].append(OBE['pointFeature']['maxima'][index_OBExyz])
+                #             surfacePointFeature['minima'].append(OBE['pointFeature']['minima'][index_OBExyz])
 
-                # test vertexX with immediate neighbours
-                if extremaType == 'maxima':
-                    if all([pfs['centroidDisp'][0] > pfs['centroidDisp'][1] + eps_STEP_AP21 for pfs in pfSurround]):
-                        if not array3x1match(edge[vertexX[v]], surfaceMaxPoint):
-                            surfaceMaxPoint.append(edge[vertexX[v]])
-                            surfaceMaxFeatureCentroidDisp.append(pfSurround[0]['centroidDisp'][0])
+            if AFS['SurfaceTypeName'] == 'SPHERICAL_SURFACE':
+                if AFS['ParsedSurface']['sphereFeatureFlag']:
+                    surfaceSphericalFeature['rotSymCentre'] = AFS['ParsedSurface']['pointFeature']['rotSymFeature'][
+                        'rotSymCentre']
+                    surfaceSphericalFeature['rotSymRadius'] = AFS['ParsedSurface']['pointFeature']['rotSymFeature'][
+                        'rotSymRadius']
 
-                elif extremaType == 'minima':
-                    if all([pfs['centroidDisp'][0] < pfs['centroidDisp'][1] - eps_STEP_AP21 for pfs in pfSurround]):  # local min
-                        if not array3x1match(edge[vertexX[v]], surfaceMinPoint):
-                            surfaceMinPoint.append(edge[vertexX[v]])
-                            surfaceMinFeatureCentroidDisp.append(pfSurround[0]['centroidDisp'][0])
-
-                maxPFlen = max([len(pfs['u']) for pfs in pfSurround])-1
-                if maxPFlen > 1:
-                    crawlindex = 1
-                    while crawlindex < maxPFlen:
-                        # should capture all local max/min before second vertex
-                        for pfsIndex, pfs in enumerate(pfSurround):
-                            if crawlindex < len(pfs['centroidDisp']) - 1: # 'centroidDisp' find local maxima/minima
-                                pfcd0 = pfs['centroidDisp'][crawlindex-1]
-                                pfcd1 = pfs['centroidDisp'][crawlindex]
-                                pfcd2 = pfs['centroidDisp'][crawlindex+1]
-
-                                if reversedOrder[pfsIndex]:
-                                    u = len(pfs['u']) - crawlindex - 1 #CHECK
-                                else:
-                                    u = crawlindex
-
-                                if extremaType == 'maxima':
-                                    if (pfcd1 > pfcd0 + eps_STEP_AP21) and (pfcd1 > pfcd2 + eps_STEP_AP21): # local max
-                                        #vse = edge[vertexXref_surroundIndex[v]][adjacentEdgeRefs[pfsIndex]]
-                                        if not array3x1match(pfs['xyz'][u], surfaceMaxPoint):
-                                            surfaceMaxPoint.append(pfs['xyz'][u])
-                                            surfaceMaxFeatureCentroidDisp.append(pfcd1)
-
-                                elif extremaType == 'minima':
-                                    if (pfcd1 < pfcd0 - eps_STEP_AP21) and (pfcd1 < pfcd2 - eps_STEP_AP21):  # local min
-                                        #vse = edge[vertexXref_surroundIndex[v]][adjacentEdgeRefs[pfsIndex]]
-                                        if not array3x1match(pfs['xyz'][u], surfaceMinPoint):
-                                            surfaceMinPoint.append(pfs['xyz'][u])
-                                            surfaceMinFeatureCentroidDisp.append(pfcd1)
-
-                        crawlindex +=1
+    return surfacePointFeature, surfaceSphericalFeature
 
 
-# collate maxima minima extrema within all surfaces, note that local max/min implies that no global hierarchy is required
-surfacePointFeature = dict() # todo: this should become an initiated class
-surfacePointFeature['xyz'] = []
-surfacePointFeature['centroidDisp'] = []
-surfacePointFeature['maxima'] = []
-surfacePointFeature['minima'] = []
+def translateShapeMatchFormat():
+    # translate to shapeMatch friendly categories
+    shapeMatchFormat = dict()  # todo: this should become an initiated class
+    shapeMatchFormat['featureMaxPoints'] = []
+    shapeMatchFormat['featureMinPoints'] = []
 
-surfaceSphericalFeature = dict()
-surfaceSphericalFeature['rotSymCentre'] = []
-surfaceSphericalFeature['rotSymRadius'] = []
+    for spf_i, spf in enumerate(surfacePointFeature['xyz']):
+        if surfacePointFeature['maxima'][spf_i]:
+            if not array3x1match(spf, shapeMatchFormat['featureMaxPoints']):
+                shapeMatchFormat['featureMaxPoints'].append(spf)
+        if surfacePointFeature['minima'][spf_i]:
+            if not array3x1match(spf, shapeMatchFormat['featureMinPoints']):
+                shapeMatchFormat['featureMinPoints'].append(spf)
 
-#for AFSindex, AFS in enumerate(AdvancedFaceSurfaces):
+    shapeMatchFormat['featureSphereDisps'] = []
+    shapeMatchFormat['spherePoints'] = []
+
+    for ssf_i, ssf in enumerate(surfaceSphericalFeature['rotSymCentre']):
+        if not array3x1match(ssf, shapeMatchFormat['spherePoints']):
+            shapeMatchFormat['spherePoints'].append(ssf)
+            shapeMatchFormat['featureSphereDisps'].append(surfaceSphericalFeature['rotSymRadius'][ssf_i])
+
+    shapeMatchFormat['rotSymRidgePoints'] = []
+    shapeMatchFormat['rotSymGroovePoints'] = []
+    shapeMatchFormat['featureMaxCurveDisps'] = []
+    shapeMatchFormat['featureMaxCentres'] = []
+    shapeMatchFormat['featureMinCurveDisps'] = []
+    shapeMatchFormat['featureMinCentres'] = []
+
+    for rotSymAxis in rotSymFeatures: # per axis
+        for rsf_i, rsf in enumerate(rotSymAxis['rotSymCentre']):
+            if rotSymAxis['maxima'][rsf_i]:
+                if not array3x1match(rsf, shapeMatchFormat['featureMaxCentres']):
+                    shapeMatchFormat['featureMaxCentres'].append(rsf)
+                    shapeMatchFormat['featureMaxCurveDisps'].append(rotSymAxis['rotSymRadius'][rsf_i])
+            if rotSymAxis['minima'][rsf_i]:
+                if not array3x1match(rsf, shapeMatchFormat['featureMinCentres']):
+                    shapeMatchFormat['featureMinCentres'].append(rsf)
+                    shapeMatchFormat['featureMinCurveDisps'].append(rotSymAxis['rotSymRadius'][rsf_i])
+
+    return shapeMatchFormat
+
+
+# todo: looking for 'superTypeName', e.g TiltedCylinder.step
 for AFS in AdvancedFaceSurfaces:
-    if (AFS.get('ParsedSurface') is not None):
-        for index_xyz, xyz in enumerate(AFS['ParsedSurface']['pointFeature']['xyz']):
-            if not array3x1match(xyz, surfacePointFeature['xyz']):
-                surfacePointFeature['xyz'].append(xyz)
-                surfacePointFeature['centroidDisp'].append(AFS['ParsedSurface']['pointFeature']['centroidDisp'][index_xyz])
-                surfacePointFeature['maxima'].append(AFS['ParsedSurface']['pointFeature']['maxima'][index_xyz])
-                surfacePointFeature['minima'].append(AFS['ParsedSurface']['pointFeature']['minima'][index_xyz])
+    for edge in AFS['outerBoundEdgeLoop']:
+        if (edge.get('superTypeNameFlag') is not None):
+            if edge['superTypeName'] == 'SEAM_CURVE':  # exclude SEAM_CURVE data
+                print("is this code reachable??")
 
 
-        if AFS['SurfaceTypeName'] == 'SPHERICAL_SURFACE':
-            if AFS['ParsedSurface']['sphereFeatureFlag']:
-                surfaceSphericalFeature['rotSymCentre'] = AFS['ParsedSurface']['pointFeature']['rotSymFeature']['rotSymCentre']
-                surfaceSphericalFeature['rotSymRadius'] = AFS['ParsedSurface']['pointFeature']['rotSymFeature']['rotSymRadius']
+parseAdjacentFeatures(AdvancedFaceSurfaces)
+
+# Note that rotSymFeatures returns fields consistent with rotationally symmetrical objects along consistent axes.
+# Relative maxima/minima would be lost if rotational features divided between individual surface
+rotSymFeatures = getRotSymFeatures(AdvancedFaceSurfaces)
+
+surfacePointFeature, surfaceSphericalFeature = getPointFeatures(AdvancedFaceSurfaces)
+
+shapeMatchFeatures = translateShapeMatchFormat()
+
 
 #     def __init__(self):
 #         self.objectHandle = (
@@ -6352,281 +5581,393 @@ for AFS in AdvancedFaceSurfaces:
 
 #         self.centrePoints = []
 
+# export to shapeMatch format
 
-pass
 
-# for AFSindex, AFS in enumerate(AdvancedFaceSurfaces):
-#     if AFS['SurfaceTypeName'] == 'SPHERICAL_SURFACE':
-#         # edge and surface point only equidistant from origin if centre coincides with origin
-#         print("write code for SPHERICAL_SURFACE")
-#         break
-#     else:
-#         # commence with searching local minima around edges associated with AFS surface
-#         for edge in AFS['outerBoundEdgeLoop']:
-#             if (edge.get('superTypeNameFlag') is not None):
-#                 if edge['superTypeName'] == 'SEAM_CURVE':  # exclude SEAM_CURVE data
-#                     print("is this code reachable??")
-#                     break
-#                     # unnecessary?
+pass  # stop here for now
+_1=1
+
 #
+# class STEPmodel(object):
+#     """class and methods to encapsulate objects and methods unique to FreeCAD environment"""
+#
+#     def __init__(self):
+#         self.objectHandle = (
+#             ""  # pointer or string used to reference model in CAD model-space
+#         )
+#         self.filepath = ""
+#         self.name = ""
+#         self.generationTime = 0
+#         self.surfaceStatus = ""
+#         self.insertionPoint = Point(0.0, 0.0, 0.0)
+#         self.rotation = 0.0
+#         self.rotationAxis = None
+#         self.rotationMatrix = None
+#         self.scale = 1.0
+#         self.featureMaxPoints = []
+#         self.featureMinPoints = []  # arrange as a list of lists representing points
+#         self.surfacePoints = []
+#         self.centroid = None
+#         self.rotSymRidgePoints = []
+#         self.rotSymGroovePoints = []
+#         self.featureMaxCurveDisps = []
+#         self.featureMaxCentres = []
+#         self.featureMinCurveDisps = []
+#         self.featureMinCentres = []
+#         self.featureSphereDisps = []
+#         self.spherePoints = []
+#         self.centrePoints = []
+#
+#     # noinspection PyTypeChecker
+#     def importSTEPmodel(
+#         self,
+#         filepath="",
+#         insertionPoint=Point(0.0, 0.0, 0.0),
+#         scale=1,
+#         rotation=0.0,
+#         rotationAxis=[],
+#     ):
+#         """
+#         FreeCAD dependent
+#
+#         :param filepath: string
+#         :param insertionPoint: {x,y,z} Cartesian tuple, not equivalent to centroid
+#         :param scale: floating point scalar
+#         :param rotation: floating point scalar for Rhino degree value (0.0 <= rotation <= 360.0)
+#         :param rotationAxis:
+#         """
+#
+#         # get default values from existing object or replace default initialisation values with given parameters
+#         if (filepath == "") and not (self.filepath == ""):
+#             filepath = self.filepath
+#         elif self.filepath == "":
+#             self.filepath = filepath
+#
+#         if (insertionPoint == Point(0.0, 0.0, 0.0)) and not (
+#             self.insertionPoint == Point(0.0, 0.0, 0.0)
+#         ):
+#             insertionPoint = self.insertionPoint
+#         elif self.insertionPoint == Point(0.0, 0.0, 0.0):
+#             self.insertionPoint = insertionPoint
+#
+#         if (scale == 1) and not (self.scale == 1):
+#             scale = self.scale
+#         elif self.scale == 1:
+#             self.scale = scale
+#
+#         if (rotation == 0.0) and not (self.rotation == 0.0):
+#             rotation = self.rotation
+#         elif self.rotation == 0.0:
+#             self.rotation = rotation
+#
+#         if (rotationAxis == []) and not (self.rotationAxis is None):
+#             rotationAxis = self.rotationAxis
+#         elif self.rotationAxis is None:
+#             self.rotationAxis = rotationAxis
+#
+#         if self.name == "":
+#             self.name = os.path.basename(filepath)
+#
+#         # def angleAxisTranslate2AffineMat(rotAxis, theta, disp):
+#         #     """
+#         #     Affine transformation matrix from 3x3 rotation matrix and displacement vector.
+#         #     3x3 rotation matrix derived from CCW angle theta around axis
+#         #     From: http://en.wikipedia.org/wiki/Rotation_matrix#Axis_and_angle & transform3d
+#         #
+#         #     :param rotAxis: axis of rotation vector axis emanating from origin
+#         #     :param theta: scalar angle of rotation
+#         #     :param disp: displacement from origin point, presumed (0,0,0)
+#         #     :return: 4x4 matrix representing affine transformation
+#         #     """
+#         #
+#         #     s = sin(theta); c = cos(theta); C = (1 - c)
+#         #
+#         #     xs = rotAxis[0] * s; ys = rotAxis[1] * s; zs = rotAxis[2] * s
+#         #
+#         #     xC = rotAxis[0] * C; yC = rotAxis[1] * C; zC = rotAxis[2] * C
+#         #
+#         #     xyC = rotAxis[0] * yC; yzC = rotAxis[1] * zC; zxC = rotAxis[2] * xC
+#         #
+#         #     xxC = rotAxis[0] * xC; yyC = rotAxis[1] * yC; zzC = rotAxis[2] * zC
+#         #
+#         #     return F_app.Matrix(xxC + c, xyC - zs, zxC + ys, disp[0],
+#         #                         xyC + zs, yyC + c, yzC - xs, disp[1],
+#         #                         zxC - ys, yzC + xs, zzC + c, disp[2],
+#         #                         0,        0,        0,       1      )
+#
+#         try:
+#             # filepath sanity check
+#             checkPath = glob.glob(filepath)
+#             if len(checkPath) != 1:
+#                 raise Exception("pathname failure")
 #             else:
-#                 edgeMinima = {}
-#                 edgeMinimaCentroidDisp = {}
+#                 self.objectHandle = Part_app.read(filepath)
 #
-#                 # in the instance that a vertex is the edge minima, compare minima associated with adjoining edges & surfaces
-#                 # adjEdgeSet, adjSurfaceSet contain the indices of adjacent surface & edges
+#             if not self.objectHandle.isValid():
+#                 raise Exception("imported STEP file fails geometry checks")
 #
-#                 if edge['vertex1extremaMin']:
-#                     adjSurfaceSet = edge['vertex1SurfacesIndex'].values()
-#                     adjEdgeSet = edge['vertex1edgesIndex'].values()
+#             if self.objectHandle.check():
+#                 print("imported STEP file passes detailed geometry shape.check()")
 #
-#                 elif edge['vertex2extremaMin']:
-#                     adjSurfaceSet = edge['vertex2SurfacesIndex'].values()
-#                     adjEdgeSet = edge['vertex2edgesIndex'].values()
+#             if not self.objectHandle.isClosed():
+#                 raise Exception("imported STEP file fails closed geometry checks")
 #
-#                 else:  # minPoint somewhere between vertices on edge todo midpoint=> surfaces adjoining endpoints
-#                     adjSurfaceSet = edge['edgeAdjSurfacesIndex'].values()
-#                     # adjEdgeSet is union of set of edges at each vertex & remove identity edge
-#                     adjEdgeSet = ([edge['vertex1edgesIndex'][i] for i in edge['vertex1edgesIndex'].keys() if i is not edge['edgeRef']] +
-#                                   [edge['vertex2edgesIndex'][i] for i in edge['vertex2edgesIndex'].keys() if i is not edge['edgeRef']])
+#             # uniform scaling
+#             if scale - 1.0 >= eps:
+#                 scalingMatrix = F_app.Matrix()
+#                 scalingMatrix.scale(scale, scale, scale)
+#                 self.objectHandle = self.objectHandle.transformGeometry(scalingMatrix)
 #
+#             # shape rotation
+#             # if math.fabs(rotation) > eps:
+#             if not rotationAxis:
+#                 # rotationAxis = F_app.Vector(0.0, 0.0, 1.0)  # Z-axis
+#                 rotationAxis = [0.0, 0.0, 0.0]
 #
-#                 # vertexX, adjacent surfaces minima
-#                 for adjSurfaceIndex in adjSurfaceSet:
-#                     adjSurface = AdvancedFaceSurfaces[adjSurfaceIndex]
-#                     if adjSurface['ParsedSurface'].get('minimaPoints') is not None:
-#                         edgeMinima[adjSurface['SurfaceRef']] = adjSurface['ParsedSurface']['minimaPoints']
-#                         edgeMinimaCentroidDisp[adjSurface['SurfaceRef']] = adjSurface['ParsedSurface']['minimaPointsCentroidDisp']
-#                     elif adjSurface['ParsedSurface'].get('minPoint') is not None:
-#                         edgeMinima[adjSurface['SurfaceRef']] = adjSurface['ParsedSurface']['minPoint']
-#                         edgeMinimaCentroidDisp[adjSurface['SurfaceRef']] = adjSurface['ParsedSurface']['minPointCentroidDisp']
+#             self.rotationMatrix = angleAxis2RotMat(rotationAxis, math.radians(rotation))
+#             self.objectHandle.Placement.Matrix = F_app.Matrix(
+#                 self.rotationMatrix[0][0],
+#                 self.rotationMatrix[0][1],
+#                 self.rotationMatrix[0][2],
+#                 self.insertionPoint.x,
+#                 self.rotationMatrix[1][0],
+#                 self.rotationMatrix[1][1],
+#                 self.rotationMatrix[1][2],
+#                 self.insertionPoint.y,
+#                 self.rotationMatrix[2][0],
+#                 self.rotationMatrix[2][1],
+#                 self.rotationMatrix[2][2],
+#                 self.insertionPoint.z,
+#                 0,
+#                 0,
+#                 0,
+#                 1,
+#             )
 #
-#                     # 'rotSymCentre' is centre of rotationally symmetrical surface feature (e.g. cylinder minimum)
-#                     if adjSurface['ParsedSurface']['rotSymFeature'].get('rotSymCentre') is not None:
-#                         if adjSurface['ParsedSurface'].get('rotSymMin') is not None:
-#                             if adjSurface['ParsedSurface'].get('minPointCentroidDisp') is not None:
-#                                 edgeMinima[adjSurface['SurfaceRef']] = adjSurface['ParsedSurface']['rotSymFeature']['rotSymCentre']
-#                                 edgeMinimaCentroidDisp[adjSurface['SurfaceRef']] = adjSurface['ParsedSurface']['minPointCentroidDisp']
-#                             else:
-#                                 print("unexpected!")
+#         except Exception as e:
+#             raise RuntimeError("Model insertion failure")
 #
-#                 # vertexX, adjacent edges minima, get all relevant minima adjacent to origin vertex/edge/surface
-#                 for adjSurfaceEdgeIndex in adjEdgeSet:
-#                     adjEdge = AdvancedFaceSurfaces[adjSurfaceEdgeIndex[0]]['outerBoundEdgeLoop'][adjSurfaceEdgeIndex[1]]
-#                     if adjEdge.get('minimaPoints') is not None:
-#                         edgeMinima[adjEdge['edgeRef']] = adjEdge['minimaPoints']
-#                         edgeMinimaCentroidDisp[adjEdge['edgeRef']] = adjEdge['minimaPointsCentroidDisp']
-#                     elif adjEdge.get('minPoint') is not None:
-#                         edgeMinima[adjEdge['edgeRef']] = adjEdge['minPoint']
-#                         edgeMinimaCentroidDisp[adjEdge['edgeRef']] = adjEdge['minPointCentroidDisp']
-#                     if adjEdge.get('rotSymMin') is not None:
-#                         edgeMinima[adjEdge['edgeRef']] = adjEdge['rotSymCentre']
-#                         edgeMinimaCentroidDisp[adjEdge['edgeRef']] = adjEdge['rotSymRadius']
+#     def rayModelIntersection(self, V1, V2):
+#         """
+#         Returns the vertex that is at the intersection of the face
+#         and the line that passes through vertex1 and vertex2
 #
-#                 # test if local minimum relative to surrounding minima
-#                 if len(edgeMinimaCentroidDisp) < 1:
-#                     deltaMin = 0.0
-#                 else:
-#                     deltaMin = edge['minPointCentroidDisp'] - min(edgeMinimaCentroidDisp.values())
-#                 if (np.abs(deltaMin) * 2 < eps_STEP_AP21) or (deltaMin <= 0):
-#                     if edge.get('rotSymCentre') is not None: # rotSym feature
-#                         if not array3x1match(edge['rotSymCentre'], surfaceMinRotSym):  # check already exists
-#                             surfaceMinRotSym.append(edge['rotSymCentre'])
-#                             surfaceMinFeatureCentroidDisp .append(edge['minPointCentroidDisp'])
-#                     if edge.get('minimaPoints') is not None:
-#                         #
-#                         for minp, minpi in enumerate(edge['minimaPoints']):
-#                             if not array3x1match(minp, surfaceMinPoint):
-#                                 surfaceMinPoint.append(minp)
-#                                 surfaceMinFeatureCentroidDisp.append(edge['minimaPointsCentroidDisp'][minpi])
-#                     elif edge.get('minPoint') is not None:
-#                         if not array3x1match(edge['minPoint'], surfaceMinPoint):
-#                             surfaceMinPoint.append(edge['minPoint'])
-#                             surfaceMinFeatureCentroidDisp .append(edge['minPointCentroidDisp'])
-#                         edge['localMinima'] = True
+#         :param V1: origin of ray
+#         :param V2: direction of ray
+#         :return:
+#         """
+#
+#         # Define a faraway extent that allows FreeCAD to approximate an infinite ray for intersection points.
+#         FreeCADEXTENTS = 100  # calculation speed sensitive to this scaling value
+#         # not required for rayModelIntersection3()
+#
+#         # input variable check, vertices must be of Point type
+#         for v in [V1, V2]:
+#             if v.__class__.__name__ == "Shape":
+#                 v = Point(v.Vertexes.Point.x, v.Vertexes.Point.y, v.Vertexes.Point.z)
+#
+#         # offset V1 to cartesian origin, (0, 0, 0), move V2 accordingly
+#         _V2 = Point(V2.x - V1.x, V2.y - V1.y, V2.z - V1.z)
+#         lenV = sqrt(_V2.x**2 + _V2.y**2 + _V2.z**2)
+#         unitV = Point(_V2.x / lenV, _V2.y / lenV, _V2.z / lenV)
+#         farV2 = Point(
+#             FreeCADEXTENTS * unitV.x, FreeCADEXTENTS * unitV.y, FreeCADEXTENTS * unitV.z
+#         )
+#         farV1 = Point(-farV2.x, -farV2.y, -farV2.z)
+#         farV2 = Point(farV2.x + V1.x, farV2.y + V1.y, farV2.z + V1.z)
+#         farV1 = Point(farV1.x + V1.x, farV1.y + V1.y, farV1.z + V1.z)
+#
+#         # """
+#         # Redefine second vertex as the second vertex projected to the surface
+#         # of a large sphere centered at the first vertex.
+#         #
+#         # :param V1: origin of ray
+#         # :param V2: direction of ray, to be moved to far model extents
+#         # :param sphereR: radius of far model extents
+#         # :return: redefined V2
+#         # """
+#
+#         ray = Part_app.makeLine(
+#             (farV1.x, farV1.y, farV1.z), (farV2.x, farV2.y, farV2.z)
+#         )
+#         intersections = ray.common(self.objectHandle)
+#         # if intersections.Vertexes:
+#         #     [print(i.Point.x, i.Point.y, i.Point.z) for i in intersections.Vertexes]
+#         intersections = [
+#             Point(i.Point.x, i.Point.y, i.Point.z) for i in intersections.Vertexes
+#         ]
+#         # if vertex1 in intersections:
+#         #     intersections.remove(vertex1)
+#         if intersections:
+#             [
+#                 self.surfacePoints.append(i)
+#                 for i in intersections
+#                 if i not in self.surfacePoints
+#             ]
+#
+#         return intersections
+#
+#     def rayModelIntersection2(self, V1, V2):
+#         """
+#         Returns the vertex that is at the intersection of the face
+#         and the line that passes through vertex1 and vertex2
+#
+#         :param V1: origin of ray
+#         :param V2: direction of ray
+#         :return:
+#         """
+#
+#         # Define a faraway extent that allows FreeCAD to approximate an infinite ray for intersection points.
+#         FreeCADEXTENTS = 300  # calculation speed sensitive to this scaling value
+#         # not required for rayModelIntersection3()
+#
+#         # input variable check, vertices must be of Point type
+#         # for v in [V1, V2]:
+#         #     if v.__class__.__name__ == 'Shape':
+#         #         v = Point(v.Vertexes.Point.x, v.Vertexes.Point.y, v.Vertexes.Point.z)
+#
+#         # offset V1 to cartesian origin, (0, 0, 0), move V2 accordingly
+#         _V2 = Point(V2.x - V1.x, V2.y - V1.y, V2.z - V1.z)
+#         lenV = sqrt(_V2.x**2 + _V2.y**2 + _V2.z**2)
+#         unitV = Point(_V2.x / lenV, _V2.y / lenV, _V2.z / lenV)
+#         farV2 = Point(
+#             FreeCADEXTENTS * unitV.x, FreeCADEXTENTS * unitV.y, FreeCADEXTENTS * unitV.z
+#         )
+#         # farV1 = Point(-farV2.x, -farV2.y, -farV2.z)
+#         farV2 = Point(farV2.x + V1.x, farV2.y + V1.y, farV2.z + V1.z)
+#         # farV1 = Point(farV1.x + V1.x, farV1.y + V1.y, farV1.z + V1.z)
+#
+#         # """
+#         # Redefine second vertex as the second vertex projected to the surface
+#         # of a large sphere centered at the first vertex.
+#         #
+#         # :param V1: origin of ray
+#         # :param V2: direction of ray, to be moved to far model extents
+#         # :param sphereR: radius of far model extents
+#         # :return: redefined V2
+#         # """
+#
+#         intersectSet = []
+#         ray = Part_app.makeLine((V1.x, V1.y, V1.z), (farV2.x, farV2.y, farV2.z))
+#         intersections = ray.common(self.objectHandle)
+#         if intersections.Vertexes:
+#             for iv in intersections.Vertexes:
+#                 if not (
+#                     (abs(iv.Point.x - V1.x) < eps)
+#                     and (abs(iv.Point.y - V1.y) < eps)
+#                     and (abs(iv.Point.z - V1.z) < eps)
+#                 ):
+#                     if (
+#                         (abs(iv.Point.x - farV2.x) < eps)
+#                         and (abs(iv.Point.y - farV2.y) < eps)
+#                         and (abs(iv.Point.z - farV2.z) < eps)
+#                     ):
+#                         print(
+#                             "WARNING: far model intersection constant likely to have been exceeded by model extents"
+#                         )
 #                     else:
-#                         edge['localMinima'] = False
+#                         intersectSet.append(Point(iv.Point.x, iv.Point.y, iv.Point.z))
 #
-#         # test minima of surface patch (AFS) against those of immediate surface edges
-#         # note that multiple local surface minima can have an overall minima value
-#         # todo this approach breaks where there are multiple equal minima within a single surface: prepare for list representation
-#         edgeMinima = {}
-#         edgeMinimaCentroidDisp = {}
-#         for edge in AFS['outerBoundEdgeLoop']: # todo 'faceInnerBoundEdgeLoopList'
-#             if edge['minPoint'] is not None:
-#                 edgeMinima[edge['edgeRef']] = edge['minPoint']
-#                 edgeMinimaCentroidDisp[edge['edgeRef']] = edge['minPointCentroidDisp']
+#             [
+#                 self.surfacePoints.append(i)
+#                 for i in intersectSet
+#                 if i not in self.surfacePoints
+#             ]
 #
-#         # test minima of surface patch against those of surface edges
-#         # groove representation here? - 'minPointCentroidDisp' will work, 'minArcPoint' represents arc centre? minFeatureCentroidDisp
-#         if (AFS['ParsedSurface'].get('minPointCentroidDisp') is not None):
-#             if len(edgeMinimaCentroidDisp) < 1:
-#                 deltaMin = 0.0
-#             else:
-#                 deltaMin = AFS['ParsedSurface']['minPointCentroidDisp'] - min(edgeMinimaCentroidDisp.values())
+#         return intersectSet
 #
-#             if (np.abs(deltaMin) < eps_STEP_AP21) or (deltaMin < 0):
-#                 if AFS['ParsedSurface']['minPoint'] is None: # rotSym feature
-#                     if len(surfaceMinPoint) > 0:
-#                         if len(surfaceMinRotSym) > 0:
-#                             if not array3x1match(AFS['ParsedSurface']['rotSymFeature']['rotSymCentre'], surfaceMinRotSym):  # check already exists
-#                                 surfaceMinRotSym.append(AFS['ParsedSurface']['rotSymFeature']['rotSymCentre'])
-#                                 surfaceMinFeatureCentroidDisp.append(AFS['ParsedSurface']['minPointCentroidDisp'])
-#                         else: # first value
-#                             surfaceMinRotSym.append(AFS['ParsedSurface']['rotSymFeature']['rotSymCentre'])
-#                             surfaceMinFeatureCentroidDisp.append(AFS['ParsedSurface']['minPointCentroidDisp'])
-#                 else:
-#                     if surfaceMinPoint is not None:
-#                         if not array3x1match(AFS['ParsedSurface']['minPoint'], surfaceMinPoint): # check already exists
-#                             surfaceMinPoint.append(AFS['ParsedSurface']['minPoint'])
-#                             surfaceMinFeatureCentroidDisp.append(AFS['ParsedSurface']['minPointCentroidDisp'])
-#                     else:
-#                         surfaceMinPoint.append(AFS['ParsedSurface']['minPoint'])
-#                         surfaceMinFeatureCentroidDisp.append(AFS['ParsedSurface']['minPointCentroidDisp'])
-#                     AFS['ParsedSurface']['localMinima'] = True
-#                     for edge in AFS['outerBoundEdgeLoop']:
-#                         edge['localMinima'] = False
-#             # else:
-#             #     AFS['ParsedSurface']['localMinima'] = False
+#         # face.Surface.intersect(edge.Curve)[0][0] should look like
+#         # face.Shape.Surface.intersect(edge.Curve)[0][0] if working with objects
+#
+#     def rayModelIntersection3(self, V1, V2):
+#         """
+#         Returns the vertex that is at the intersection of the face
+#         and the line that passes through vertex1 and vertex2
+#
+#         :param V1: origin of ray
+#         :param V2: direction of ray
+#         :return:
+#         """
+#
+#         ray = Part_app.makeLine(V1, V2)
+#         # extract the curve from the ray, then test intersections with shape faces
+#         allFaceSets = [ray.Curve.intersect(f.Surface) for f in self.objectHandle.Faces]
+#         intersectPoints = [x for face in allFaceSets for x in face if x]
+#         intersectPoints = [x for face in intersectPoints for x in face]
+#         intersectPoints = [Point(p.X, p.Y, p.Z) for p in intersectPoints]
+#         [
+#             self.surfacePoints.append(i)
+#             for i in intersectPoints
+#             if i not in self.surfacePoints
+#         ]
+#         return intersectPoints
+#
+#     def printModelAlignment(self):
+#         """
+#         Print insertion point and rotation of model to stdout.
+#
+#         :return: stdout display
+#         """
+#         print(
+#             "Model insertion point: x: {:f}, y: {:f}, z: {:f}".format(
+#                 self.insertionPoint.x, self.insertionPoint.y, self.insertionPoint.z
+#             )
+#         )
+#         print("Model insertion scale: {:f}".format(self.scale))
+#         print("Model insertion rotation (single axis?): {:f}".format(self.rotation))
+#         if self.rotationAxis:
+#             print(
+#                 "Model insertion rotation axis: [{:f}, {:f}, {:f}]".format(
+#                     self.rotationAxis[0], self.rotationAxis[1], self.rotationAxis[2]
+#                 )
+#             )
+#         else:
+#             print("Model insertion rotation axis: []")
+#
+#     def featureClean(self):
+#         """
+#         remove spurious NaN values from feature values,
+#         (malformed tests)
+#         """
+#
+#         def cleanPointNaN(P):
+#             Pclean = [
+#                 p for p in P if not any([np.isnan(p.x), np.isnan(p.y), np.isnan(p.z)])
+#             ]
+#             if len(Pclean) != len(Pclean):
+#                 print("NaN cleaned")
+#             return Pclean
+#
+#         def cleanNaN(P):
+#             Pclean = [p for p in P if not np.isnan(p)]
+#             if len(Pclean) != len(Pclean):
+#                 print("NaN cleaned")
+#             return Pclean
+#
+#         # cleanPointNaN = lambda P: [p for p in P if not any([np.isnan(p.x), np.isnan(p.y), np.isnan(p.z)])]
+#         # cleanNaN = lambda P: [p for p in P if not np.isnan(p)]
+#
+#         self.featureMaxPoints = cleanPointNaN(self.featureMaxPoints)
+#         self.featureMinPoints = cleanPointNaN(self.featureMinPoints)
+#         self.surfacePoints = cleanPointNaN(self.surfacePoints)
+#         self.rotSymRidgePoints = cleanPointNaN(self.rotSymRidgePoints)
+#         self.rotSymGroovePoints = cleanPointNaN(self.rotSymGroovePoints)
+#         self.featureMaxCurveDisps = cleanNaN(self.featureMaxCurveDisps)
+#         self.featureMaxCentres = cleanPointNaN(self.featureMaxCentres)
+#         self.featureMinCurveDisps = cleanNaN(self.featureMinCurveDisps)
+#         self.featureMinCentres = cleanPointNaN(self.featureMinCentres)
+#         self.featureSphereDisps = cleanNaN(self.featureSphereDisps)
 
-# print(surfaceMinPoint)
-# print(surfaceMinFeatureCentroidDisp )
 
-# # repeat for maxima search
-# for AFSindex, AFS in enumerate(AdvancedFaceSurfaces):
-#     if AFS['SurfaceTypeName'] == 'SPHERICAL_SURFACE':
-#         print("write code for SPHERICAL_SURFACE")
-#         # edge and surface point only equidistant from origin if centre coincides with origin
-#     else:
-#         # commence with searching local minima around edges associated with AFS surface
-#         for edge in AFS['outerBoundEdgeLoop']:
-#             if edge.get('superTypeName'):
-#                 if edge['superTypeName'] == 'SEAM_CURVE':  # exclude SEAM_CURVE data
-#                     break
-#
-#                 else:
-#                     edgeMaxima = {}
-#                     edgeMaximaCentroidDisp = {}
-#
-#                 # # in the instance that a vertex is the edge maxima, compare maxima associated with adjoining edges & surfaces
-#                 # # adjEdgeSet, adjSurfaceSet contain the indices of adjacent surface & edges
-#                 # determine whether maxPoint is vertex or edge; multiple equal maxima, see hill-climbing categorisation
-#                 # multiple local maxima suggest saddle points and/or surrounding local minima
-#
-#                 if edge['vertex1extremaMax']:
-#                     adjSurfaceSet = edge['vertex1SurfacesIndex'].values()
-#                     adjEdgeSet = edge['vertex1edgesIndex'].values()
-#                 elif edge['vertex2extremaMax']:
-#                     adjSurfaceSet = edge['vertex2SurfacesIndex'].values()
-#                     adjEdgeSet = edge['vertex2edgesIndex'].values()
-#                 else:  # maxPoint somewhere between vertices on edge
-#                     adjSurfaceSet = edge['edgeAdjSurfacesIndex'].values()
-#                     # adjEdgeSet is union of set of edges at each vertex
-#                     adjEdgeSet = ([edge['vertex1edgesIndex'][i] for i in edge['vertex1edgesIndex'].keys() if i is not edge['edgeRef']] +
-#                                   [edge['vertex2edgesIndex'][i] for i in edge['vertex2edgesIndex'].keys() if i is not edge['edgeRef']])
-#
-#                 # vertexX, adjacent surfaces maxima
-#                 for adjSurfaceIndex in adjSurfaceSet:
-#                     adjSurface = AdvancedFaceSurfaces[adjSurfaceIndex]
-#                     if adjSurface['ParsedSurface'].get('maximaPoints') is not None:
-#                         edgeMaxima[adjSurface['SurfaceRef']] = adjSurface['ParsedSurface']['maximaPoints']
-#                         edgeMaximaCentroidDisp[adjSurface['SurfaceRef']] = adjSurface['ParsedSurface']['maximaPointsCentroidDisp']
-#                     elif adjSurface['ParsedSurface'].get('maxPoint') is not None:
-#                         edgeMaxima[adjSurface['SurfaceRef']] = adjSurface['ParsedSurface']['maxPoint']
-#                         edgeMaximaCentroidDisp[adjSurface['SurfaceRef']] = adjSurface['ParsedSurface']['maxPointCentroidDisp'] # todo rename maxFeatureCentroidDisp?
-#                     # 'rotSymCentre' is centre to rotationally-symmetric feature, meaning that it's a placeholder for no-point-minima condition
-#                     if adjSurface['ParsedSurface'].get('rotSymCentre') is not None:
-#                         if adjSurface['ParsedSurface'].get('rotSymMax') is not None:
-#                             if adjSurface['ParsedSurface'].get('maxPointCentroidDisp') is not None:
-#                                 edgeMinimaCentroidDisp[adjSurface['SurfaceRef']] = adjSurface['ParsedSurface']['maxPointCentroidDisp']
-#                             else:
-#                                 print("unexpected! - frustum instance")
-#
-#                 # vertexX, adjacent edges maxima
-#                 for adjSurfaceEdgeIndex in adjEdgeSet:
-#                     adjEdge = AdvancedFaceSurfaces[adjSurfaceEdgeIndex[0]]['outerBoundEdgeLoop'][adjSurfaceEdgeIndex[1]]
-#                     if adjEdge.get('maximaPoints') is not None:
-#                         edgeMaxima[adjEdge['edgeRef']] = adjEdge['maximaPoints']
-#                         edgeMaximaCentroidDisp[adjEdge['edgeRef']] = adjEdge['maximaPointsCentroidDisp']
-#                     elif adjEdge.get('maxPoint') is not None:
-#                         edgeMaxima[adjEdge['edgeRef']] = adjEdge['maxPoint']
-#                         edgeMaximaCentroidDisp[adjEdge['edgeRef']] = adjEdge['maxPointCentroidDisp']
-#                     if adjEdge.get('rotSymMax') is not None:
-#                         edgeMinima[adjEdge['edgeRef']] = adjEdge['rotSymCentre']
-#                         edgeMinimaCentroidDisp[adjEdge['edgeRef']] = adjEdge['rotSymRadius']
-#
-#                 # test if local maximum relative to surrounding maxima
-#                 if len(edgeMaximaCentroidDisp) < 1:
-#                     deltaMax = 0.0
-#                 else:
-#                     deltaMax = edge['maxPointCentroidDisp'] - max(edgeMaximaCentroidDisp.values())
-#                 if (np.abs(deltaMax) < eps_STEP_AP21) or (deltaMax > 0): # EPS greater than or equal to
-#                     if edge.get('rotSymCentre') is not None: # rotSym feature
-#                         if not array3x1match(edge['rotSymCentre'], surfaceMaxRotSym):  # check already exists
-#                             surfaceMaxRotSym.append(edge['rotSymCentre'])
-#                             surfaceMaxFeatureCentroidDisp.append(edge['maxPointCentroidDisp'])
-#                     if edge['maxPoint'] is not None:
-#                         if not array3x1match(edge['maxPoint'], surfaceMaxPoint):
-#                             surfaceMaxPoint.append(edge['maxPoint'])
-#                             surfaceMaxFeatureCentroidDisp.append(edge['maxPointCentroidDisp'])
-#                         edge['localMaxima'] = True
-#                     else:
-#                         edge['localMaxima'] = False
-#
-#         # test maxima of surface patch (AFS) against those of immediate surface edges
-#         edgeMaxima = {}
-#         edgeMaximaCentroidDisp = {}
-#         for edge in AFS['outerBoundEdgeLoop']:
-#             if edge['maxPoint'] is not None:
-#                 edgeMaxima[edge['edgeRef']] = edge['maxPoint']
-#                 edgeMaximaCentroidDisp[edge['edgeRef']] = edge['maxPointCentroidDisp']
-#
-#         # test maxima of surface patch against those of surface edges
-#         #if (AFS['ParsedSurface'].get('maxPointCentroidDisp') is not None) and (len(edgeMaximaCentroidDisp) > 0):
-#         if (AFS['ParsedSurface'].get('maxPointCentroidDisp') is not None):
-#             if len(edgeMaximaCentroidDisp) < 1:
-#                 deltaMax = 0.0
-#             else:
-#                 deltaMax = AFS['ParsedSurface']['maxPointCentroidDisp'] - min(edgeMaximaCentroidDisp.values())
-#
-#             if (np.abs(deltaMax) < eps_STEP_AP21) or (deltaMax > 0):
-#                 if AFS['ParsedSurface']['maxPoint'] is None: # rotSym feature
-#                     if len(surfaceMaxPoint) > 0:
-#                         if len(surfaceMaxRotSym) > 0:
-#                             if not array3x1match(AFS['ParsedSurface']['rotSymFeature']['rotSymCentre'], surfaceMaxRotSym):  # check already exists
-#                                 surfaceMaxRotSym.append(AFS['ParsedSurface']['rotSymFeature']['rotSymCentre'])
-#                                 surfaceMaxFeatureCentroidDisp.append(AFS['ParsedSurface']['maxPointCentroidDisp'])
-#                         else: # first value
-#                             surfaceMaxRotSym.append(AFS['ParsedSurface']['rotSymFeature']['rotSymCentre'])
-#                             surfaceMaxFeatureCentroidDisp.append(AFS['ParsedSurface']['maxPointCentroidDisp'])
-#                     else:
-#                         if surfaceMaxPoint is not None:
-#                             if not array3x1match(AFS['ParsedSurface']['maxPoint'], surfaceMaxPoint): # check already exists
-#                                 surfaceMaxPoint.append(AFS['ParsedSurface']['maxPoint'])
-#                                 surfaceMaxFeatureCentroidDisp.append(AFS['ParsedSurface']['maxPointCentroidDisp'])
-#                         else:
-#                             surfaceMaxPoint.append(AFS['ParsedSurface']['maxPoint'])
-#                             surfaceMaxFeatureCentroidDisp.append(AFS['ParsedSurface']['maxPointCentroidDisp'])
-#                         AFS['ParsedSurface']['localMaxima'] = True
-#                         for edge in AFS['outerBoundEdgeLoop']:
-#                             edge['localMaxima'] = False
-#
-#                 else:
-#                     if surfaceMaxPoint is not None:
-#                         if not array3x1match(AFS['ParsedSurface']['maxPoint'], surfaceMaxPoint): # check already exists
-#                             surfaceMaxPoint.append(AFS['ParsedSurface']['maxPoint'])
-#                             surfaceMaxFeatureCentroidDisp.append(AFS['ParsedSurface']['maxPointCentroidDisp'])
-#                         else:
-#                             surfaceMaxPoint.append(AFS['ParsedSurface']['maxPoint'])
-#                             surfaceMaxFeatureCentroidDisp.append(AFS['ParsedSurface']['maxPointCentroidDisp'])
-#                         AFS['ParsedSurface']['localMaxima'] = True
-#                         for edge in AFS['outerBoundEdgeLoop']:
-#                             edge['localMaxima'] = False
-
-# print('p = Draft.make_point( {:1.8f}, {:1.8f}, {:1.8f})'.format(xyz[0], xyz[0], xyz[2]))
-pass # stop here for now
 
 # *****SURFACE*****
+
+# Swept_surface - swept_curve - Curve
+
+# Swept_surface - Extruded_surface - extrusion_axis - Direction
+
+# Swept_surface - Surface_of_revolution - axis_direction - Direction
+#                                       - axis_point - Cartesian_point
 
 # Plane - position - Axis_placement_3d
 # (detect if plane normal passes through origin)
@@ -6642,28 +5983,20 @@ pass # stop here for now
 # ( is cylindrical surface perpendicular to ray through origin?
 # ( if not, extract point from bounding curve)
 
-# Spherical_surface - position - Axis_placement_3d
-#                   - radius - Positive_length_measure
-# ( point on surface cotangent to centre and origin point)
-
-# Swept_surface - swept_curve - Curve
-
-# Swept_surface - Extruded_surface - extrusion_axis - Direction
-
-# Swept_surface - Surface_of_revolution - axis_direction - Direction
-#                                       - axis_point - Cartesian_point
-
 # Toroidal_surface - position - Axis_placement_3d
 #                  - radius - Positive_length_measure
 #                  - minor_radius - Positive_length_measure
 # ( if toroid is complete at outer/inner radius, increment rut-symm maxima/minima )
+
+# Spherical_surface - position - Axis_placement_3d
+#                   - radius - Positive_length_measure
+# ( point on surface cotangent to centre and origin point)
 
 # Bounded_surface - B_spline_surface - U_degree - integer
 #                                    - V_degree - integer
 #                                    - control_points - Cartesian_point
 #                                    - U_closed - boolean
 #                                    - V_closed - boolean
-# (part of complex_entity listing, need to find footpoint for maxima/minima)
 
 # Bounded_surface - B_spline_surface - Rational_B_spline_surface - real
 
@@ -6732,20 +6065,76 @@ pass # stop here for now
 #               - end_point - Cartesian_point
 
 
-# maxima/minima on edges, but not at vertices => traverse adjoining surfaces and edges until first min/max
-# maxima/minima at vertices => traverse adjoining surfaces and edges until first min/max
+# STEP Part21 decomposition:
+# https://www.mbx-if.org/documents/AP203e2_html/AP203e2.htm
 
+# root node, CLOSED_SHELL (OPEN_SHELL), Connected_Face_Set SUPERTYPE OF (ONEOF (Closed_Shell, Open_Shell))
 
-# if maxPoint/minPoint at an edge are at an edge vertex, this requires that all surfaces adjacent to this vertex are identified & tested
+#   (axis1_placement,
+#        axis2_placement_2d,
+#        axis2_placement_3d,
+#        b_spline_curve,
+#        b_spline_curve_with_knots,
+#        b_spline_surface,
+#        b_spline_surface_with_knots,
+#        bezier_curve,
+#        bezier_surface,
+#        boundary_curve,
+#        cartesian_point,
+#        cartesian_transformation_operator_3d,
+#        circle,
+#        composite_curve,
+#        composite_curve_on_surface,
+#        composite_curve_segment,
+#        conic,
+#        conical_surface,
+#        curve,
+#        curve_bounded_surface,
+#        curve_replica,
+#        cylindrical_surface,
+#        degenerate_pcurve,
+#        degenerate_toroidal_surface,
+#        dimension_count,
+#        dimension_of,
+#        direction,
+#        ellipse,
+#        evaluated_degenerate_pcurve,
+#        geometric_representation_context,
+#        geometric_representation_item,
+#        hyperbola,
+#        intersection_curve,
+#        line,
+#        offset_curve_3d,
+#        offset_surface,
+#        outer_boundary_curve,
+#        parabola,
+#        pcurve,
+#        plane,
+#        point,
+#        point_on_curve,
+#        point_on_surface,
+#        point_replica,
+#        polyline,
+#        quasi_uniform_curve,
+#        quasi_uniform_surface,
+#        rational_b_spline_curve,
+#        rational_b_spline_surface,
+#        rectangular_composite_surface,
+#        rectangular_trimmed_surface,
+#        reparametrised_composite_curve_segment,
+#        seam_curve,
+#        spherical_surface,
+#        surface,
+#        surface_curve,
+#        surface_of_linear_extrusion,
+#        surface_of_revolution,
+#        surface_replica,
+#        swept_surface,
+#        toroidal_surface,
+#        trimmed_curve,
+#        uniform_curve,
+#        uniform_surface,
 
-# traverse data and construct a set of minima points, including their nearest minima points
-# repeat for maxima points
-# philosophy is to find local minima within surrounding ring of nearest
-
-
-# identify minima/maxima points in hierarchy from local minima maxima points.
-# for every point in all points, find nearest neighbours and determine maximal disp from centroid
-# calculate rotSym minima maxima from surrounding vertices
 
 # for finding nearest vertices, can use KD-tree, e.g.
 # from scipy import spatial # numpy < 1.24
@@ -6754,416 +6143,7 @@ pass # stop here for now
 # A[spatial.KDTree(A).query(pt)[1]] # <-- the nearest point
 # distance,index = spatial.KDTree(A).query(pt)
 
-# extract all rotationally symmetric features,
-# test against adjoining surface for groove or ridge distinction
-
 # strategy for planar polygonal surfaces is to divide into non-overlapping triangles where corners are polygon vertices
 # and test for nearest/furthest point on triangle
 
 # import and build pymesh locally, see https://github.com/PyMesh/PyMesh/blob/main/README.md
-
-
-# class STEPface(object):
-#     """
-#     container class for STEP AP 203 surface
-#     """
-#
-#     def __init__(self, baseRef=""):
-#         self.baseRef = baseRef
-#         self.typeName = '' # 'CYLINDRICAL_SURFACE',
-#
-#     def addShape(
-#         self,
-#         shapeObject,
-#         shapeName
-#     ):
-#         shapeViewObject = self.modelDoc.addObject("Part::FeaturePython", shapeName)
-
-
-# STEP Part21 decomposition:
-# https://www.mbx-if.org/documents/AP203e2_html/AP203e2.htm
-
-# root node, CLOSED_SHELL (OPEN_SHELL), Connected_Face_Set SUPERTYPE OF (ONEOF (Closed_Shell, Open_Shell))
-
-# rethink
-# deconstruct STEP model to find all faces
-# categorise circles, cylinders and other forms with axes.
-# extract points from Face_outer_bound (holes in face for minima?)
-
-# first pass, find all edge cartesian_points to generate origin based on median
-# second pass, extract surface maxima from faces,
-
-# get all VERTEX, part of EDGE_LOOP
-# get median barycentre/origin
-
-# for all EDGE_LOOP, get VERTEX, find furthest vertex
-# for all surfaces bound by EDGE_LOOP, calculate if they contain a point normal to an origin-ray
-
-
-# note that for planar regions, maxima/minima is at a polygon point
-# unless polygon plane is perfectly normal to ray =>
-
-# random start, find points closest to initial Desernosphere rays (rethink: more relevant to NURBS surfaces)
-# get polygon point sets attached to point, find polygon point with max/min disp, repeat
-# cylinder surface ?? different process, look for entity type
-# efficient graph node search between interconnecting points?
-# surface normal - Newell's method for surface normal, cross product == zero, origin on a line parallel to surface normal
-
-# for any planar polygon, if 1 point is further from/closer to origin than the others, it is polygon maxima/minima
-# if 2 points share distance, lacal max/min is at edge.
-
-# for any polygon point or edge at min/max find adjacent polygon to point/edge and check for associated points/edges of lesser/greater origin displacement.
-# (3 points at equivalent disp on valid for symmetric polygon centered and normal to axis thru origin)
-
-# for any cylindrical surface, get axis position
-# find shortest distance from origin cylinder axis, returned point is orthogonal
-# determine if all cylinder edges are above or below this point
-# if not, max disp is point + radius
-
-# torus, find max/min point on major radius circle, repeat for a minor radius circle at max/min point
-
-# ellipsoid, try closest point to an ellipse parallel to major axis?
-
-# 1. get the median origin from all points
-# 2. find maximum displacement of points from this point, construct ray
-# 3. for every ray find closest cosine angle points
-# 3a. identify closest quadrant through point signs (required to translate model to origin?)
-# segmentAndPlane( p0 : Point, p1 : Point, v0 : Point, n : Point )
-# 3b. distances from points to ray
-# 4. identify surfaces associated with these (edge) points
-# 5. for each surface, determine if ray is between bounding edge points
-
-
-    #   (axis1_placement,
-    #        axis2_placement_2d,
-    #        axis2_placement_3d,
-    #        b_spline_curve,
-    #        b_spline_curve_with_knots,
-    #        b_spline_surface,
-    #        b_spline_surface_with_knots,
-    #        bezier_curve,
-    #        bezier_surface,
-    #        boundary_curve,
-    #        cartesian_point,
-    #        cartesian_transformation_operator_3d,
-    #        circle,
-    #        composite_curve,
-    #        composite_curve_on_surface,
-    #        composite_curve_segment,
-    #        conic,
-    #        conical_surface,
-    #        curve,
-    #        curve_bounded_surface,
-    #        curve_replica,
-    #        cylindrical_surface,
-    #        degenerate_pcurve,
-    #        degenerate_toroidal_surface,
-    #        dimension_count,
-    #        dimension_of,
-    #        direction,
-    #        ellipse,
-    #        evaluated_degenerate_pcurve,
-    #        geometric_representation_context,
-    #        geometric_representation_item,
-    #        hyperbola,
-    #        intersection_curve,
-    #        line,
-    #        offset_curve_3d,
-    #        offset_surface,
-    #        outer_boundary_curve,
-    #        parabola,
-    #        pcurve,
-    #        plane,
-    #        point,
-    #        point_on_curve,
-    #        point_on_surface,
-    #        point_replica,
-    #        polyline,
-    #        quasi_uniform_curve,
-    #        quasi_uniform_surface,
-    #        rational_b_spline_curve,
-    #        rational_b_spline_surface,
-    #        rectangular_composite_surface,
-    #        rectangular_trimmed_surface,
-    #        reparametrised_composite_curve_segment,
-    #        seam_curve,
-    #        spherical_surface,
-    #        surface,
-    #        surface_curve,
-    #        surface_of_linear_extrusion,
-    #        surface_of_revolution,
-    #        surface_replica,
-    #        swept_surface,
-    #        toroidal_surface,
-    #        trimmed_curve,
-    #        uniform_curve,
-    #        uniform_surface,
-
-
-    # strategy for cylinders & cones (& rotationally-symmetric spheres, surfaces of revolution or ellipsoids), determine curved edges
-    # if rot axis is between origin and surface, maxima lies on a line segment between maxima points on curved edges
-    # if rot axis is beyond surface (concave), minima lies on a line segment between minima points on curved edges
-    # otherwise maxima/minima lie on edges.
-
-
-
-# given a vertex, edge or surface, return all adjacent vertices
-# if point is on edge, return edge parallel surfaces & vertex1 + vertex2
-# point at vertex, return connected edges and all adjoining surfaces
-# point on surface, return edgeloop for surface (including inner) and all associated vertex
-
-# todo: adjoining edges & surfaces part of future surface object method
-# this process can be abstracted to a search for items in list & subset ['
-
-# # find adjoining surfaces to every surface edge
-# for AFS in AdvancedFaceSurfaces:
-#     for edgeSource in AFS['outerBoundEdgeLoop']:
-#         edgeSource['edgeAdjSurfacesIndex'] = {}
-#         for AFS2index, AFS2 in enumerate(AdvancedFaceSurfaces):
-#             for edgeTarget in AFS2['outerBoundEdgeLoop']:
-#                 if edgeSource['edgeRef'] == edgeTarget['edgeRef']:
-#                     if AFS2['SurfaceRef'] not in edgeSource['edgeAdjSurfacesIndex'].keys():
-#                         edgeSource['edgeAdjSurfacesIndex'][AFS2['SurfaceRef']] = AFS2index
-#
-# # find adjoining surfaces to every vertex 1 surface point using STEP reference coincidence
-# for AFS in AdvancedFaceSurfaces:
-#     for edgeSource in AFS['outerBoundEdgeLoop']:
-#         v1ref = edgeSource['vertex1ref']
-#         edgeSource['vertex1SurfacesIndex'] = {}
-#         for AFS2index, AFS2 in enumerate(AdvancedFaceSurfaces):
-#             for edgeTarget in AFS2['outerBoundEdgeLoop']:
-#                 if (v1ref == edgeTarget['vertex1ref']) or (v1ref == edgeTarget['vertex2ref']):
-#                     if AFS2index not in edgeSource['vertex1SurfacesIndex'].keys():
-#                         edgeSource['vertex1SurfacesIndex'][AFS2['SurfaceRef']] = AFS2index
-#
-# # find adjoining surfaces to every vertex 2 surface point
-# for AFS in AdvancedFaceSurfaces:
-#     for edgeSource in AFS['outerBoundEdgeLoop']:
-#         v2ref = edgeSource['vertex2ref']
-#         edgeSource['vertex2SurfacesIndex'] = {}
-#         for AFS2index, AFS2 in enumerate(AdvancedFaceSurfaces):
-#             for edgeTarget in AFS2['outerBoundEdgeLoop']:
-#                 if (v1ref == edgeTarget['vertex1ref']) or (v1ref == edgeTarget['vertex2ref']):
-#                     if AFS2index not in edgeSource['vertex2SurfacesIndex'].keys():
-#                         edgeSource['vertex2SurfacesIndex'][AFS2['SurfaceRef']] = AFS2index
-#
-# # find adjoining edges to every vertex 1 surface point
-# for AFS in AdvancedFaceSurfaces:
-#     for edgeSource in AFS['outerBoundEdgeLoop']:
-#         v1ref = edgeSource['vertex1ref']
-#         edgeSource['vertex1edgesIndex'] = {}
-#         for AFS2index, AFS2 in enumerate(AdvancedFaceSurfaces):
-#             for edgeTargetIndex, edgeTarget in enumerate(AFS2['outerBoundEdgeLoop']):
-#                 if (v1ref == edgeTarget['vertex1ref']) or (v1ref == edgeTarget['vertex2ref']):
-#                     if edgeTarget['edgeRef'] not in edgeSource['vertex1edgesIndex'].keys():
-#                         edgeSource['vertex1edgesIndex'][edgeTarget['edgeRef']] = (AFS2index, edgeTargetIndex)
-#
-# # find adjoining edges to every vertex 2 surface point
-# for AFS in AdvancedFaceSurfaces:
-#     for edgeSource in AFS['outerBoundEdgeLoop']:
-#         v2ref = edgeSource['vertex2ref']
-#         edgeSource['vertex2edgesIndex'] = {}
-#         for AFS2index, AFS2 in enumerate(AdvancedFaceSurfaces):
-#             for edgeTargetIndex, edgeTarget in enumerate(AFS2['outerBoundEdgeLoop']):
-#                 if (v2ref == edgeTarget['vertex1ref']) or (v2ref == edgeTarget['vertex2ref']):
-#                     if edgeTarget['edgeRef'] not in edgeSource['vertex2edgesIndex'].keys():
-#                         edgeSource['vertex2edgesIndex'][edgeTarget['edgeRef']] = (AFS2index, edgeTargetIndex)
-
-
-#================================================================================
-#
-# for AFSindex, AFS in enumerate(AdvancedFaceSurfaces):
-#     # get surface rotSymFeatures
-#     for edge in AFS['outerBoundEdgeLoop']:
-#         if (edge.get('rotSymFeature') is not None):
-#             if (edge['rotSymFeature'].get('rotSymCentre') is not None) and (edge['rotSymFeature'].get('rotSymRadius') is not None):
-#                 if type(edge['rotSymFeature']['rotSymCentre']) == list:
-#                     for rsf in range(0, len(edge['rotSymFeature']['rotSymCentre'])):
-#                         allRotSymFeatures['rotSymCentre'].append(edge['rotSymFeature']['rotSymCentre'][rsf])
-#                         allRotSymFeatures['rotSymRadius'].append(edge['rotSymFeature']['rotSymRadius'][rsf])
-#                 else:
-#                     allRotSymFeatures['rotSymCentre'].append(edge['rotSymFeature']['rotSymCentre'])
-#                     allRotSymFeatures['rotSymRadius'].append(edge['rotSymFeature']['rotSymRadius'])
-#
-#     # get surface rotSymFeatures
-#     if (AFS['ParsedSurface'].get('rotSymFeature') is not None):
-#         if (AFS['ParsedSurface']['rotSymFeature'].get('rotSymCentre') is not None) and (AFS['ParsedSurface']['rotSymFeature'].get('rotSymRadius') is not None):
-#             if type(AFS['ParsedSurface']['rotSymFeature']['rotSymCentre']) == list:
-#                 for rsf in range(0, len(AFS['ParsedSurface']['rotSymFeature']['rotSymCentre'])):
-#                     allRotSymFeatures['rotSymCentre'].append(AFS['ParsedSurface']['rotSymFeature']['rotSymCentre'][rsf])
-#                     allRotSymFeatures['rotSymRadius'].append(AFS['ParsedSurface']['rotSymFeature']['rotSymRadius'][rsf])
-#             else:
-#                 allRotSymFeatures['rotSymCentre'].append(AFS['ParsedSurface']['rotSymFeature']['rotSymCentre'])
-#                 allRotSymFeatures['rotSymRadius'].append(AFS['ParsedSurface']['rotSymFeature']['rotSymRadius'])
-#
-# print("need to test w/ multi axis")
-# SuperAxisRotSymSet = []
-# eliminationIndex = [i for i in range(0, len(allRotSymFeatures['rotSymCentre']))]
-# # create groups of adjacent rotSym features along colinear axes
-# for ARSFCindex, ARSFC in enumerate(allRotSymFeatures['rotSymCentre'] ):
-#     if (len(eliminationIndex) > 0) and (ARSFCindex in eliminationIndex):
-#         axisRotSymSet = [ARSFCindex,]
-#         SuperAxisRotSymSet.append(axisRotSymSet)
-#         eliminationIndex.pop(eliminationIndex.index(ARSFCindex))
-#         for ARSFC2index, ARSFC2 in enumerate(allRotSymFeatures['rotSymCentre']):
-#             if (len(eliminationIndex) > 0) and (ARSFC2index in eliminationIndex): # check vectors collinear
-#                 if np.isclose(np.cross(ARSFC - centroid, ARSFC2 - centroid), eps).all() and (ARSFC2index not in axisRotSymSet):
-#                     axisRotSymSet.append(ARSFC2index)
-#                     eliminationIndex.pop(eliminationIndex.index(ARSFC2index))
-#
-# # eliminate duplicates here
-#
-# superAxesSet = []
-# # need to find adjacent rotSym to establish maxima/minima
-# for SARSS in SuperAxisRotSymSet:
-#     lobeSet = dict()
-#     # need to determine which rotSymCentre lie on the same side of centroid
-#     # 1. find point maxCentroidDisp with max disp from centroid
-#     # 2. sort all other points relative to maxDispCentroid
-#
-#     centreDisps = [np.linalg.norm(allRotSymFeatures['rotSymCentre'][s] - centroid) for s in SARSS]
-#     maxCentreDisps = centreDisps.index(max(centreDisps))
-#     axisDisps = [np.linalg.norm(allRotSymFeatures['rotSymCentre'][s] - allRotSymFeatures['rotSymCentre'][maxCentreDisps]) for s in SARSS]
-#     axisDispsSorted = np.argsort(axisDisps)
-#
-#     SARSS = [SARSS[ads] for ads in axisDispsSorted]
-#
-#     lobeSet['centreCentroidDisp'] = [centreDisps[s] for s in SARSS]
-#     lobeSet['rotSymCentre'] = [allRotSymFeatures['rotSymCentre'][s] for s in SARSS]
-#     lobeSet['rotSymRadius'] = [allRotSymFeatures['rotSymRadius'][s] for s in SARSS]
-#     # check neighbours for max/min determination (equality := min)
-#     # furthest rotSym centre is always a maxima ? ----------------------------------------------------------
-#     superAxesSet.append(lobeSet)
-#
-#
-# for AFSindex, AFS in enumerate(AdvancedFaceSurfaces):
-#     # commence with searching local minima around edges associated with AFS surface
-#     # no real reason to separate vertices into points closer to localCentroid than arc/circle, and those on the far side.
-#     for edge in AFS['outerBoundEdgeLoop']:
-#         if (edge.get('rotSymFeature') is not None): # only single value in ['rotSymFeature'], no min, max for edges ??---------------------
-#             if (edge['rotSymFeature'].get('rotSymCentre') is not None) and (edge['rotSymFeature'].get('rotSymRadius') is not None):
-#                 # recall that it is not required for adjacent surfaces/edges to be radially symmetric
-#                 adjSurfaceSet = edge['edgeAdjSurfacesIndex'].values()
-#                 # presuming it is not required to identify edges
-#
-#                 # normalise axis normal
-#                 rotSymCentroidDisp = np.linalg.norm(edge['rotSymFeature']['rotSymCentre'] - centroid)
-#                 if rotSymCentroidDisp > eps:
-#                     rotAxisDir = (edge['rotSymFeature']['rotSymCentre'] - centroid) / rotSymCentroidDisp
-#                 else:
-#                     # if centre to rotSym feature coincides with centroid, get rotAxisDir from other parsed data
-#                     if AFS['ParsedSurface'].get('normDir') is not None:
-#                         rotAxisDir = AFS['ParsedSurface']['normDir']
-#                     else:
-#                         print("no surface axisDir value, cross()?")
-#
-#                 # adjacent surfaces minima,  nearPointAxisDisp > rotSymCentroidDisp
-#                 # near & far based on disp from centroid
-#                 nearPointAxisDisp = []
-#                 farPointAxisDisp = []
-#                 #ddump=[]
-#
-#                 for adjSurfaceIndex in adjSurfaceSet:
-#                     adjSurface = AdvancedFaceSurfaces[adjSurfaceIndex]
-#                     for adjSurfaceEdge in adjSurface['outerBoundEdgeLoop']:
-#                         if edge['edgeRef'] != adjSurfaceEdge['edgeRef']:
-#
-#                             # project all points, vertex1, vertex2, maxPoint, minPoint to rotational axis
-#                             adjSurfaceVertices = adjSurfaceEdge['pointFeature']['xyz']
-#
-#                             for asv in adjSurfaceVertices:
-#                                 #pAxisProj = pointProjectAxis(asv, centroid, rotAxisDir)
-#                                 #pAxisProj = rotAxisDir * np.dot((asv - centroid), rotAxisDir) / np.dot(rotAxisDir, rotAxisDir)
-#
-#                                 if rotSymCentroidDisp > eps:
-#                                     pAxisProj = rotAxisDir * np.dot((asv - centroid), rotAxisDir) / np.dot(rotAxisDir, rotAxisDir)
-#                                 else:
-#                                     pAxisProj = rotAxisDir * np.dot(asv, rotAxisDir) / np.dot(rotAxisDir, rotAxisDir)
-#
-#                                 pAxisDisp = np.linalg.norm(asv - pAxisProj)
-#                                 #ddump.append(np.dot((asv - edge['rotSymFeature']['rotSymCentre']), rotAxis))
-#
-#                                 rotSymEdgeDisp = np.dot((asv - edge['rotSymFeature']['rotSymCentre']), rotAxisDir)
-#                                 #print(rotSymEdgeDisp)
-#                                 if rotSymEdgeDisp > eps: # eps_
-#                                     #if np.linalg.norm(pAxisProj - centroid) > rotSymCentroidDisp:
-#                                     farPointAxisDisp.append(pAxisDisp)
-#                                 elif rotSymEdgeDisp < -eps:
-#                                     nearPointAxisDisp.append(pAxisDisp)
-#
-#                 if len(nearPointAxisDisp)==0 or len(farPointAxisDisp)==0:
-#                     # disc at end of object, defined as rotSymMax
-#                     edge['rotSymMax'] = True
-#                 else:
-#                     NPADA = np.average(nearPointAxisDisp)
-#                     FPADA = np.average(farPointAxisDisp)
-#
-#                     # conical midpoints
-#                     avgRadius = np.abs(NPADA - FPADA)/2 + min([NPADA, FPADA])
-#                     if avgRadius > edge['radius']:
-#                         # ridge
-#                         edge['rotSymMax'] = True
-#                     else:
-#                         edge['rotSymMin'] = True
-#             # else:
-#             #     edge['rotSymCentre'] = None
-#             #     edge['rotSymRadius'] = None
-#
-#     # the other class of minima integral to surfaces, e.g. ring minima on cylinders
-#     if (AFS['ParsedSurface'].get('rotSymFeature') is not None):
-#         if (AFS['ParsedSurface']['rotSymFeature'].get('rotSymCentre') is not None) and (AFS['ParsedSurface'].get('rotSymRadius') is not None):
-#
-#             # normalise axis normal
-#             rotSymCentroidDisp = np.linalg.norm(AFS['ParsedSurface']['rotSymFeature']['rotSymCentre'] - centroid)
-#             if rotSymCentroidDisp > eps:
-#                 rotAxisDir = (AFS['ParsedSurface']['rotSymFeature']['rotSymCentre'] - centroid) / rotSymCentroidDisp
-#             else:
-#                 # if centre to rotSym feature coincides with centroid, get rotAxisDir from other parsed data
-#                 if AFS['ParsedSurface'].get('normDir') is not None:
-#                     rotAxisDir = AFS['ParsedSurface']['normDir']
-#                 else:
-#                     print("no surface axisDir value, cross()?")
-#
-#             # todo what happens with several rotationally symmetric features within a surface?
-#             # todo list check?
-#
-#             # adjacent surfaces minima,  nearPointAxisDisp > rotSymCentroidDisp
-#             nearPointAxisDisp = []
-#             farPointAxisDisp = []
-#
-#             # use edges in surface FaceOuterBoundEdgeLoopList
-#             for adjSurfaceEdge in AFS['outerBoundEdgeLoop']:
-#                 # project all points, vertex1, vertex2, maxPoint, minPoint to rotational axis
-#                 adjSurfaceVertices = adjSurfaceEdge['pointFeature']['xyz']
-#                 for asv in adjSurfaceVertices:
-#                     #pAxisProj = pointProjectAxis(asv, centroid, rotAxisDir)
-#                     #pAxisProj = rotAxisDir * np.dot((asv - centroid), rotAxisDir) / np.dot(rotAxisDir, rotAxisDir)
-#                     #pAxisProj = rotAxisDir * np.dot(asv, rotAxisDir) / np.dot(rotAxisDir, rotAxisDir)
-#
-#                     if rotSymCentroidDisp > eps:
-#                         pAxisProj = rotAxisDir * np.dot((asv - centroid), rotAxisDir) / np.dot(rotAxisDir, rotAxisDir)
-#                     else:
-#                         pAxisProj = rotAxisDir * np.dot(asv, rotAxisDir) / np.dot(rotAxisDir, rotAxisDir)
-#
-#                     pAxisDisp = np.linalg.norm(asv - pAxisProj)
-#                     rotSymEdgeDisp = np.dot((asv - AFS['ParsedSurface']['rotSymFeature']['rotSymCentre']), rotAxisDir)
-#                     if rotSymEdgeDisp > eps:  # eps_
-#                         # if np.linalg.norm(pAxisProj - centroid) > rotSymCentroidDisp:
-#                         farPointAxisDisp.append(pAxisDisp)
-#                     elif rotSymEdgeDisp < -eps:
-#                         nearPointAxisDisp.append(pAxisDisp)
-#
-#                 if len(nearPointAxisDisp) == 0 or len(farPointAxisDisp) == 0:
-#                     # disc at end of object, defined as rotSymMax
-#                     AFS['ParsedSurface']['rotSymMax'] = True
-#                 else:
-#                     NPADA = np.average(nearPointAxisDisp)
-#                     FPADA = np.average(farPointAxisDisp)
-#
-#                     # conical midpoints
-#                     avgRadius = np.abs(NPADA - FPADA) / 2 + min([NPADA, FPADA])
-#                     if avgRadius > AFS['ParsedSurface']['rotSymRadius']:
-#                         # groove
-#                         AFS['ParsedSurface']['rotSymMax'] = True
-#                     else:
-#                         AFS['ParsedSurface']['rotSymMin'] = True
