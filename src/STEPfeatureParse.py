@@ -1338,8 +1338,8 @@ def BsplineCurveExtremaDisp(C, p,
         if not any(np.isclose(m, u, eps1).all() for u in extremaUnique):
             extremaUnique.append(m)
 
-    if (localExtrema and (
-            len(extremaUnique) == 1)) or not localExtrema:  # if there is only one extrema, localextrema is moot
+    # if there is only one extrema, localextrema is moot
+    if (localExtrema and (len(extremaUnique) == 1)) or not localExtrema:
         if uv_xyz:
             return extremaUnique  # return single value in list for compatibility
         else:
@@ -1349,7 +1349,7 @@ def BsplineCurveExtremaDisp(C, p,
             if uv_xyz:
                 return extremaUnique
             else:
-                return C.evaluate_list(extremaUnique)
+                return [np.array(cp) for cp in C.evaluate_list(extremaUnique)]
         else:  # return single maxima
             extremaUniquePoint = C.evaluate_list(extremaUnique)
             dispsExtrema = [np.linalg.norm(np.array(e) - p) for e in extremaUniquePoint]
@@ -3419,15 +3419,6 @@ def BsplineCurveWithKnotsParse(localCentroid, ParsedEdge, STEP_entities_):
     #     // movable anyway. See #issue 0003176: Sketcher: always over-constrained when referencing
     #     // external B-Spline
 
-    # https://git.dev.opencascade.org/gitweb/?p=occt.git;a=blob;f=src/BSplCLib/BSplCLib.cxx;h=1414f5008b3b2a79583a0af67e0a05fcd52569cb;hb=HEAD
-    # 1917   // index is the first pole of the current curve for insertion schema
-    # 1918
-    # 1919   if (Periodic) index = -Mults(Mults.Lower());
-    # 1920   else          index = -Degree-1;
-
-    # 1922   // on Periodic curves the first knot and the last knot are inserted later
-    # 1923   // (they are the same knot)
-    # 1924   firstmult = 0;  // multiplicity of the first-last knot for periodic
 
     maxPointsU = BsplineCurveExtremaDisp(BsplineKnotCurve,
                                          localCentroid,
@@ -3436,6 +3427,7 @@ def BsplineCurveWithKnotsParse(localCentroid, ParsedEdge, STEP_entities_):
                                          maxSearch=True,
                                          uv_xyz=True)
 
+    #maxPoints = [np.array(cp) for cp in BsplineKnotCurve.evaluate_list(maxPointsU)]
     maxPoints = BsplineKnotCurve.evaluate_list(maxPointsU)
 
     minPointsU = BsplineCurveExtremaDisp(BsplineKnotCurve,
@@ -3445,12 +3437,19 @@ def BsplineCurveWithKnotsParse(localCentroid, ParsedEdge, STEP_entities_):
                                          maxSearch=False,
                                          uv_xyz=True)
 
+    #minPoints = [np.array(cp) for cp in BsplineKnotCurve.evaluate_list(minPointsU)]
     minPoints = BsplineKnotCurve.evaluate_list(minPointsU)
 
     # normalise u to [0, 1] - unrequired where normalize_kv=True
     # knotRange = _knotvector[-1] - _knotvector[0]
     # maxPointsU = [(mpu - _knotvector[0])/knotRange for mpu in maxPointsU]
     # minPointsU = [(mpu - _knotvector[0])/knotRange for mpu in minPointsU]
+
+    # exception to provided vertices in revolved surface
+    if ParsedEdge.get('vertex1') is None:
+        ParsedEdge['vertex1'] = np.array(BsplineKnotCurve.evaluate_single(0.))
+    if ParsedEdge.get('vertex2') is None:
+        ParsedEdge['vertex2'] = np.array(BsplineKnotCurve.evaluate_single(1.))
 
     maximaU = maxPointsU + minPointsU
     maximaPoints = maxPoints + minPoints
@@ -3463,7 +3462,7 @@ def BsplineCurveWithKnotsParse(localCentroid, ParsedEdge, STEP_entities_):
         maxima_truth = [(maximaU[mu + 1] - maximaU[mu]) > eps_STEP_AP21 for mu in range(0, len(maximaU) - 1)]
         maxima_truth = maxima_truth + [True, ]
         maximaU = [mu for (mu, mt) in zip(maximaU, maxima_truth) if mt]
-        maximaPoints = [mp for (mp, mt) in zip(maximaPoints, maxima_truth) if mt]
+        maximaPoints = [np.array(mp) for (mp, mt) in zip(maximaPoints, maxima_truth) if mt]
 
         # if vertex1 centroidDisp is close to u[0],
         # or vertex2 centroidDisp is close to u[-1],
@@ -3486,7 +3485,8 @@ def BsplineCurveWithKnotsParse(localCentroid, ParsedEdge, STEP_entities_):
 
     # maximaPoints.insert(0, ParsedEdge['vertex1']) # ParsedEdge['pointFeature']['xyz'][0])
     # maximaPoints.insert(-1, ParsedEdge['vertex2']) # ParsedEdge['pointFeature']['xyz'][-1])
-    ParsedEdge['pointFeature']['xyz'] = np.array([ParsedEdge['vertex1'], ] + maximaPoints + [ParsedEdge['vertex2'], ])
+    # ParsedEdge['pointFeature']['xyz'] = np.array([ParsedEdge['vertex1'], ] + maximaPoints + [ParsedEdge['vertex2'], ])
+    ParsedEdge['pointFeature']['xyz'] = [ParsedEdge['vertex1'], ] + maximaPoints + [ParsedEdge['vertex2'], ]
     ParsedEdge['pointFeature']['u'] = [0, ] + maximaU + [1]
     ParsedEdge['pointFeature']['centroidDisp'] = centroidDisp
 
@@ -3677,12 +3677,9 @@ def edgeSTEPparse(edgeInstance_, STEP_entities_):
                                                   np.linalg.norm(centroid - vertex2)]
     ParsedEdge['pointFeature']['u'] = [0, 1]  # normalise to [0, 1]
 
-    edgeParams = STEP_entities_[ref2index(edgeCurveParams[2])].params
-    edgeParamsName = STEP_entities_[ref2index(edgeCurveParams[2])].type_name
-    edgeRef = STEP_entities_[ref2index(edgeCurveParams[2])].ref
-    ParsedEdge['typeName'] = edgeParamsName
-    ParsedEdge['edgeRef'] = edgeRef
-    ParsedEdge['edgeParams'] = edgeParams
+    ParsedEdge['typeName'] = STEP_entities_[ref2index(edgeCurveParams[2])].type_name
+    ParsedEdge['edgeRef'] = STEP_entities_[ref2index(edgeCurveParams[2])].ref
+    ParsedEdge['edgeParams'] = STEP_entities_[ref2index(edgeCurveParams[2])].params
 
     return ParsedEdge
 
@@ -3791,8 +3788,7 @@ def revolvedSurfaceParse(AFS, c, minimaExtrema):
     :return ParsedSurface object
     '''
 
-    # A surface_of_revolution is the surface obtained by rotating a curve one complete revolution about an
-    # axis.
+    # A surface_of_revolution is the surface obtained by rotating a curve one complete revolution about an axis.
     # Will assume that any curvature will be in the plane of the axis.
     # Reposition curve on both sides of axis in plane of axis and local centroid to find maxima/minima, see cone
 
@@ -3814,71 +3810,86 @@ def revolvedSurfaceParse(AFS, c, minimaExtrema):
         ParsedSurface = AFS['ParsedSurface']
         axisPoint = ParsedSurface['axisPoint']
         normDir = ParsedSurface['normDir']  # Z
-        #radius = ParsedSurface['radius']
-        #semiAngle = ParsedSurface['semiAngle']
+        revolvedCurveRef = ParsedSurface['revolvedCurveRef']
 
     else:
 
         axisPoint, normDir = axis1Placement(AFS['SurfaceParams'][-1], STEP_entities)
-
-        semiAngle = AFS['SurfaceParams'][-1]
-        radius = AFS['SurfaceParams'][-2]
+        revolvedCurveRef = AFS['SurfaceParams'][-2]
 
         ParsedSurface = {}
         ParsedSurface['axisPoint'] = axisPoint
         ParsedSurface['normDir'] = normDir  # Z
-        #ParsedSurface['refDir'] = refDir  # X
-        #ParsedSurface['auxDir'] = auxDir
-        ParsedSurface['semiAngle'] = semiAngle
-        ParsedSurface['radius'] = radius
+        ParsedSurface['revolvedCurveRef'] = revolvedCurveRef
 
         ParsedSurface['pointFeature'] = {}
         ParsedSurface['pointFeature']['xyz'] = []
         ParsedSurface['pointFeature']['centroidDisp'] = []
         ParsedSurface['pointFeature']['maxima'] = []
         ParsedSurface['pointFeature']['minima'] = []
-
-        AFS[
-            'ParsedSurface'] = ParsedSurface  # for the purpose of extracting axisPoint, normDir for inside/outside point detection
 
     AFS['ParsedSurface'] = ParsedSurface
     if not minimaExtrema:
         # return ParsedSurface
         return
 
-    # test if cone is rotationally symmetrical, if localCentroid is close to axisDir through axisPoint
-    rotSymDisp = np.linalg.norm((centroid - axisPoint) - np.dot((centroid - axisPoint), normDir) * normDir)
+    SurfaceProfile = {}
+    SurfaceProfile['edgeRef'] = STEP_entities[ref2index(revolvedCurveRef)].ref
+    SurfaceProfile['edgeParams'] = STEP_entities[ref2index(revolvedCurveRef)].params
+    SurfaceProfile['typeName'] = STEP_entities[ref2index(revolvedCurveRef)].type_name
 
+    SurfaceProfile['pointFeature'] = {}
+    SurfaceProfile['pointFeature']['xyz'] = []
+    SurfaceProfile['pointFeature']['centroidDisp'] = []
+    SurfaceProfile['pointFeature']['maxima'] = []
+    SurfaceProfile['pointFeature']['minima'] = []
 
-    if AFS.get('ParsedSurface') is not None:  # recalculation of max/min
-        ParsedSurface = AFS['ParsedSurface']
-        centrePoint = ParsedSurface['axisPoint']
-        normDir = ParsedSurface['normDir']  # Z
-        refDir = ParsedSurface['refDir']  # X
-        auxDir = ParsedSurface['auxDir']  # Y
-    else:
-        centrePoint, normDir, refDir = axis2Placement3D(AFS['SurfaceParams'][1], STEP_entities)
-        auxDir = np.cross(normDir, refDir)
-        auxDir = auxDir / np.linalg.norm(auxDir)
-        radius = AFS['SurfaceParams'][-1]
-
-        ParsedSurface = {}
-        ParsedSurface['radius'] = radius
-        ParsedSurface['axisPoint'] = centrePoint
-        ParsedSurface['normDir'] = normDir  # Z
-        ParsedSurface['refDir'] = refDir  # X
-        ParsedSurface['auxDir'] = auxDir
-
-        ParsedSurface['pointFeature'] = {}
-        ParsedSurface['pointFeature']['xyz'] = []
-        ParsedSurface['pointFeature']['centroidDisp'] = []
-        ParsedSurface['pointFeature']['maxima'] = []
-        ParsedSurface['pointFeature']['minima'] = []
+    edgeParse(centroid, SurfaceProfile, STEP_entities)
 
     AFS['ParsedSurface'] = ParsedSurface
     if not minimaExtrema:  # not much point
         # return ParsedSurface
         return
+
+    #centroid = np.array([10., 10., 0.]) #--------------------------------------------------------------------TEST
+
+
+    # test if localCentroid is close to axisDir through axisPoint
+    rotSymDisp = np.linalg.norm((centroid - axisPoint) - np.dot((centroid - axisPoint), normDir) * normDir)
+
+    if rotSymDisp < eps_STEP_AP21:
+        # no requirement to rotate centroid, surface maxima & minima are returned point maxima & minima from edgeParse
+        # but reassigned as rotSym feature
+        ParsedSurface['rotSymFeature'] = dict()
+        ParsedSurface['rotSymFeature']['rotSymCentre'] = []
+        ParsedSurface['rotSymFeature']['rotSymRadius'] = []
+        # ParsedSurface['rotSymCentre'] = axisPoint
+        if len(SurfaceProfile['pointFeature']['xyz']) > 0:
+             for rsf in range(0, len(SurfaceProfile['pointFeature']['xyz'])):
+                ParsedSurface['rotSymFeature']['rotSymCentre'].append(SurfaceProfile['pointFeature']['xyz'][rsf])
+                ParsedSurface['rotSymFeature']['rotSymRadius'].append(SurfaceProfile['pointFeature']['centroidDisp'][rsf])
+
+
+    else:
+        # rotate centroid point to plane of axis & curve rather than rotating curve,
+        # find minima/maxima point on curve wrt centroid,
+        # again reliant on assumption that curvature is in the plane of axis
+
+        # project centroid and a vertex to plane defined by normDir and axisPoint
+        projectCentroid = centroid - np.dot(centroid - axisPoint, normDir) * normDir
+        projectVertex1 = SurfaceProfile['vertex1'] - np.dot(SurfaceProfile['vertex1'] - axisPoint, normDir) * normDir
+        projectVertex2 = SurfaceProfile['vertex2'] - np.dot(SurfaceProfile['vertex2'] - axisPoint, normDir) * normDir
+        if np.linalg.norm(projectVertex1 - axisPoint) >= np.linalg.norm(projectVertex2 - axisPoint):
+            projectCurve = projectVertex1
+        else:
+            projectCurve = projectVertex2
+
+        centroidRot = np.dot(projectCentroid, projectCurve)/(np.linalg.norm(projectCurve - axisPoint) * np.linalg.norm(projectCentroid - axisPoint))
+        centroidRotM = rotationMatrix(normDir, np.arccos(centroidRot))
+
+        # θ = arccos[(a · b) / (| a | | b |)].
+
+
 
 
 def sphereSurfaceParse(AFS, localCentroid, minimaExtrema=False):
