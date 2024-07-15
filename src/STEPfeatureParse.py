@@ -2778,11 +2778,6 @@ def circleParse(localCentroid, ParsedEdge, STEP_entities_):
     # # distance is signed: positive when S is on the side of the plane where u faces and
     # # negative on the other side. zero, S is in the plane
 
-    Cdisp = np.dot((localCentroid - axisPoint), normDir)
-    Cproj = localCentroid - np.dot(Cdisp, normDir)  # point projected to plane along orthogonal
-    rotSymDisp = np.linalg.norm(Cproj - axisPoint)
-    # print("rotSymDisp: " + str(rotSymDisp))
-
     # min/max point on arc wrt centroid
     minPoint, maxPoint = pointCircleMinMaxDisp(
         localCentroid,
@@ -2794,12 +2789,23 @@ def circleParse(localCentroid, ParsedEdge, STEP_entities_):
 
     v1 = ParsedEdge['vertex1']
     v2 = ParsedEdge['vertex2']  # v1 always equals v2 for full circle
-    # ParsedEdge['minPoint'] = minPoint
+
+    # recalculated every centroid update
+    ParsedEdge['pointFeature']['xyz'] = [v1, v2]
+    ParsedEdge['pointFeature']['centroidDisp'] = [np.linalg.norm(centroid - v1),
+                                                  np.linalg.norm(centroid - v2)]
+    ParsedEdge['pointFeature']['u'] = [0, 1]  # normalise to [0, 1]
 
     extrema = []
     if maxPoint is not None: extrema.append(np.array(maxPoint))
     if minPoint is not None: extrema.append(np.array(minPoint))
-    # extrema = [maxPoint, minPoint]
+
+    if ParsedEdge['vertex1ref'] == ParsedEdge['vertex2ref']:
+        # provide an extra vertex on opposite side of rotSym axis
+        # to balance median point centroid search
+        oppVertex = [centroid[0] - v1[0], centroid[1] - v1[1], centroid[2] - v1[2]]
+        extrema.append(np.array(oppVertex))
+
     pointsInArc, pointOrderIndex, uArc = pointOrderInArc(extrema, v1, v2, refDir, auxDir, normDir, axisPoint)
     pointsInArc = [pointsInArc[poi] for poi in pointOrderIndex]
     extrema = [extrema[poi] for poi in pointOrderIndex]
@@ -2815,6 +2821,11 @@ def circleParse(localCentroid, ParsedEdge, STEP_entities_):
                 ParsedEdge['pointFeature']['centroidDisp'].insert(-1, np.linalg.norm(ex - localCentroid))
                 ParsedEdge['pointFeature']['u'].insert(-1, uArc[ex_i])  # check u proximity?
 
+    Cdisp = np.dot((localCentroid - axisPoint), normDir)
+    Cproj = localCentroid - np.dot(Cdisp, normDir)  # point projected to plane along orthogonal
+    rotSymDisp = np.linalg.norm(Cproj - axisPoint)
+    # print("rotSymDisp: " + str(rotSymDisp))
+
     # centroid orthogonal to centrePoint
     if rotSymDisp < eps_STEP_AP21:
         # case of minPoint equidistant from circle centre - edge case
@@ -2825,6 +2836,19 @@ def circleParse(localCentroid, ParsedEdge, STEP_entities_):
         ParsedEdge['rotSymFeature']['rotSymRadius'] = radius
         ParsedEdge['rotSymFeature']['radiusCentroidDisp'] = np.sqrt(
             radius ** 2 + np.linalg.norm(axisPoint - localCentroid) ** 2)
+
+        # # remove previously found point extrema
+        # ParsedEdge['pointFeature']['xyz'] = []
+        # ParsedEdge['pointFeature']['centroidDisp'] = []
+        # ParsedEdge['pointFeature']['u'] = []
+
+        # alternative is to provide an extra vertex on opposide side of rotSym axis
+        # to balance median point centroid search
+
+
+
+
+
 
 
 def ellipseParse(localCentroid, ParsedEdge, STEP_entities_):
@@ -2880,7 +2904,16 @@ def ellipseParse(localCentroid, ParsedEdge, STEP_entities_):
     v1 = ParsedEdge['vertex1']
     v2 = ParsedEdge['vertex2']
 
-    extrema = [maxPoint, minPoint]
+    extrema = []
+    if maxPoint is not None: extrema.append(np.array(maxPoint))
+    if minPoint is not None: extrema.append(np.array(minPoint))
+
+    if ParsedEdge['vertex1ref'] == ParsedEdge['vertex2ref']:
+        # provide an extra vertex on opposite side of rotSym axis
+        # to balance median point centroid search
+        oppVertex = [centroid[0] - v1[0], centroid[1] - v1[1], centroid[2] - v1[2]]
+        extrema.append(np.array(oppVertex))
+
     pointsInArc, pointOrderIndex, uArc = pointOrderInArc(extrema,
                                                          v1,
                                                          v2,
@@ -3671,11 +3704,12 @@ def edgeSTEPparse(edgeInstance_, STEP_entities_):
             # vertex2centroidDisp = np.linalg.norm(centroid - vertex2)
             # ParsedEdge['vertex1centroidDisp'] = vertex2centroidDisp
 
+    # must be recalculated on every centroid update
     ParsedEdge['pointFeature'] = {}
-    ParsedEdge['pointFeature']['xyz'] = [ParsedEdge['vertex1'], ParsedEdge['vertex2']]
-    ParsedEdge['pointFeature']['centroidDisp'] = [np.linalg.norm(centroid - vertex1),
-                                                  np.linalg.norm(centroid - vertex2)]
-    ParsedEdge['pointFeature']['u'] = [0, 1]  # normalise to [0, 1]
+    # ParsedEdge['pointFeature']['xyz'] = [ParsedEdge['vertex1'], ParsedEdge['vertex2']]
+    # ParsedEdge['pointFeature']['centroidDisp'] = [np.linalg.norm(centroid - vertex1),
+    #                                               np.linalg.norm(centroid - vertex2)]
+    # ParsedEdge['pointFeature']['u'] = [0, 1]  # normalise to [0, 1]
 
     ParsedEdge['typeName'] = STEP_entities_[ref2index(edgeCurveParams[2])].type_name
     ParsedEdge['edgeRef'] = STEP_entities_[ref2index(edgeCurveParams[2])].ref
@@ -3803,9 +3837,6 @@ def revolvedSurfaceParse(AFS, c, minimaExtrema):
     # geometric_representation_item()||
     # vector(axis_position.z, 1.0));
 
-    _1=1
-
-
     if AFS.get('ParsedSurface') is not None:  # recalculation of max/min
         ParsedSurface = AFS['ParsedSurface']
         axisPoint = ParsedSurface['axisPoint']
@@ -3825,6 +3856,7 @@ def revolvedSurfaceParse(AFS, c, minimaExtrema):
         ParsedSurface['pointFeature'] = {}
         ParsedSurface['pointFeature']['xyz'] = []
         ParsedSurface['pointFeature']['centroidDisp'] = []
+        ParsedEdge['pointFeature']['u'] = []
         ParsedSurface['pointFeature']['maxima'] = []
         ParsedSurface['pointFeature']['minima'] = []
 
@@ -3843,19 +3875,21 @@ def revolvedSurfaceParse(AFS, c, minimaExtrema):
     SurfaceProfile['pointFeature']['centroidDisp'] = []
     SurfaceProfile['pointFeature']['maxima'] = []
     SurfaceProfile['pointFeature']['minima'] = []
+    SurfaceProfile['pointFeature']['u'] = []
 
     edgeParse(centroid, SurfaceProfile, STEP_entities)
 
-    AFS['ParsedSurface'] = ParsedSurface
-    if not minimaExtrema:  # not much point
-        # return ParsedSurface
-        return
-
     #centroid = np.array([10., 10., 0.]) #--------------------------------------------------------------------TEST
-
 
     # test if localCentroid is close to axisDir through axisPoint
     rotSymDisp = np.linalg.norm((centroid - axisPoint) - np.dot((centroid - axisPoint), normDir) * normDir)
+
+    Cdisp = np.dot((centroid - axisPoint), normDir)
+    Cproj = centroid - np.dot(Cdisp, normDir)  # point projected to plane along orthogonal
+    rotSymDisp2 = np.linalg.norm(Cproj - axisPoint)
+    print("rotSymDisp: " + str(rotSymDisp))
+    print("rotSymDisp2: " + str(rotSymDisp2))
+    print("offset centroid revolvedSurfaceParse untested, line 3869")
 
     if rotSymDisp < eps_STEP_AP21:
         # no requirement to rotate centroid, surface maxima & minima are returned point maxima & minima from edgeParse
@@ -3863,11 +3897,17 @@ def revolvedSurfaceParse(AFS, c, minimaExtrema):
         ParsedSurface['rotSymFeature'] = dict()
         ParsedSurface['rotSymFeature']['rotSymCentre'] = []
         ParsedSurface['rotSymFeature']['rotSymRadius'] = []
-        # ParsedSurface['rotSymCentre'] = axisPoint
+
         if len(SurfaceProfile['pointFeature']['xyz']) > 0:
              for rsf in range(0, len(SurfaceProfile['pointFeature']['xyz'])):
-                ParsedSurface['rotSymFeature']['rotSymCentre'].append(SurfaceProfile['pointFeature']['xyz'][rsf])
-                ParsedSurface['rotSymFeature']['rotSymRadius'].append(SurfaceProfile['pointFeature']['centroidDisp'][rsf])
+                 ParsedSurface['rotSymFeature']['rotSymCentre'].append(pointProjectAxis(SurfaceProfile['pointFeature']['xyz'][rsf], axisPoint, normDir))
+                 ParsedSurface['rotSymFeature']['rotSymRadius'].append(SurfaceProfile['pointFeature']['centroidDisp'][rsf])
+
+        # reset SurfaceProfile['pointFeature'] to avoid being reclassed as general point features
+        # SurfaceProfile['pointFeature']['xyz'] = []
+        # SurfaceProfile['pointFeature']['centroidDisp'] = []
+        # SurfaceProfile['pointFeature']['u'] = []
+        # provide 180 degree points see circleParse
 
 
     else:
@@ -5379,8 +5419,8 @@ def getPointFeatures(AdvancedFaceSurfaces):
                                 reversePF['u'] = adjPF['u'].copy()
                                 reversePF['u'].reverse()
                                 reversePF['xyz'] = adjPF['xyz'].copy()
-                                if not isinstance(reversePF['xyz'], list):
-                                    _1=1
+                                # if not isinstance(reversePF['xyz'], list):
+                                #     _1=1
                                 reversePF['xyz'].reverse()
                                 reversePF['centroidDisp'] = adjPF['centroidDisp'].copy()
                                 reversePF['centroidDisp'].reverse()
