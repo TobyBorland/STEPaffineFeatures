@@ -5590,6 +5590,33 @@ def translateShapeMatchFormat():
                     shapeMatchFormat['featureMinCentres'].append(rsf)
                     shapeMatchFormat['featureMinCurveDisps'].append(rotSymAxis['rotSymRadius'][rsf_i])
 
+    # problem of feature points on edges that form part of surfaces of revolution,
+    # e.g. spline minima/maxima not at revolved surface boundary
+    # note not consistently marked as "seam_curve"
+
+    featureMaxPoints = []
+    featureMinPoints = []
+    for fminc, fminr in zip(shapeMatchFormat['featureMaxCentres'], shapeMatchFormat['featureMaxCurveDisps']):
+        for fmaxp in shapeMatchFormat['featureMaxPoints']:
+            if np.linalg.norm(fmaxp - fminc) - fminr > eps_STEP_AP21:
+                featureMaxPoints.append(fmaxp)
+
+        for fminp in shapeMatchFormat['featureMinPoints']:
+            if np.linalg.norm(fminp - fminc) - fminr > eps_STEP_AP21:
+                featureMinPoints.append(fminp)
+
+    for fminc, fminr in zip(shapeMatchFormat['featureMinCentres'], shapeMatchFormat['featureMinCurveDisps']):
+        for fmaxp in shapeMatchFormat['featureMaxPoints']:
+            if np.linalg.norm(fmaxp - fminc) - fminr > eps_STEP_AP21:
+                featureMaxPoints.append(fmaxp)
+
+        for fminp in shapeMatchFormat['featureMinPoints']:
+            if np.linalg.norm(fminp - fminc) - fminr > eps_STEP_AP21:
+                featureMinPoints.append(fminp)
+
+    shapeMatchFormat['featureMaxPoints'] = featureMaxPoints
+    shapeMatchFormat['featureMinPoints'] = featureMinPoints
+
     return shapeMatchFormat
 
 
