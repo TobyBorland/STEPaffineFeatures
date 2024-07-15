@@ -2726,6 +2726,15 @@ def segmentParse(localCentroid, ParsedEdge, STEP_entities_):
                                                                        ParsedEdge['vertex2'])
     # todo, if there are multiple minima, return list? store minpoint as list?
 
+    v1 = ParsedEdge['vertex1']
+    v2 = ParsedEdge['vertex2']  # v1 always equals v2 for full circle
+
+    # recalculated every centroid update
+    ParsedEdge['pointFeature']['xyz'] = [v1, v2]
+    ParsedEdge['pointFeature']['centroidDisp'] = [np.linalg.norm(centroid - v1).item(),
+                                                  np.linalg.norm(centroid - v2).item()]
+    ParsedEdge['pointFeature']['u'] = [0, 1]  # normalise to [0, 1]
+
     if not v1ext and not v2ext:
         ParsedEdge['pointFeature']['xyz'].insert(1, minPoint)
         ParsedEdge['pointFeature']['centroidDisp'].insert(1, minPointCentroidDisp)
@@ -2792,8 +2801,8 @@ def circleParse(localCentroid, ParsedEdge, STEP_entities_):
 
     # recalculated every centroid update
     ParsedEdge['pointFeature']['xyz'] = [v1, v2]
-    ParsedEdge['pointFeature']['centroidDisp'] = [np.linalg.norm(centroid - v1),
-                                                  np.linalg.norm(centroid - v2)]
+    ParsedEdge['pointFeature']['centroidDisp'] = [np.linalg.norm(centroid - v1).item(),
+                                                  np.linalg.norm(centroid - v2).item()]
     ParsedEdge['pointFeature']['u'] = [0, 1]  # normalise to [0, 1]
 
     extrema = []
@@ -2818,8 +2827,8 @@ def circleParse(localCentroid, ParsedEdge, STEP_entities_):
         if not np.isclose(v1, ex).all() and not np.isclose(v2, ex).all():
             if not any([np.isclose(uArc[ex_i], uu) for uu in ParsedEdge['pointFeature']['u']]):
                 ParsedEdge['pointFeature']['xyz'].insert(-1, ex)
-                ParsedEdge['pointFeature']['centroidDisp'].insert(-1, np.linalg.norm(ex - localCentroid))
-                ParsedEdge['pointFeature']['u'].insert(-1, uArc[ex_i])  # check u proximity?
+                ParsedEdge['pointFeature']['centroidDisp'].insert(-1, np.linalg.norm(ex - localCentroid).item())
+                ParsedEdge['pointFeature']['u'].insert(-1, uArc[ex_i].item())  # check u proximity?
 
     Cdisp = np.dot((localCentroid - axisPoint), normDir)
     Cproj = localCentroid - np.dot(Cdisp, normDir)  # point projected to plane along orthogonal
@@ -2832,10 +2841,10 @@ def circleParse(localCentroid, ParsedEdge, STEP_entities_):
         # assign rotSymCentre feature point at centre
 
         ParsedEdge['rotSymFeature'] = dict()
-        ParsedEdge['rotSymFeature']['rotSymCentre'] = axisPoint
-        ParsedEdge['rotSymFeature']['rotSymRadius'] = radius
-        ParsedEdge['rotSymFeature']['radiusCentroidDisp'] = np.sqrt(
-            radius ** 2 + np.linalg.norm(axisPoint - localCentroid) ** 2)
+        ParsedEdge['rotSymFeature']['rotSymCentre'] = [axisPoint,]
+        ParsedEdge['rotSymFeature']['rotSymRadius'] = [radius,]
+        ParsedEdge['rotSymFeature']['radiusCentroidDisp'] = [np.sqrt(
+            radius ** 2 + np.linalg.norm(axisPoint - localCentroid) ** 2).item(),]
 
         # # remove previously found point extrema
         # ParsedEdge['pointFeature']['xyz'] = []
@@ -2904,6 +2913,12 @@ def ellipseParse(localCentroid, ParsedEdge, STEP_entities_):
     v1 = ParsedEdge['vertex1']
     v2 = ParsedEdge['vertex2']
 
+    # recalculated every centroid update
+    ParsedEdge['pointFeature']['xyz'] = [v1, v2]
+    ParsedEdge['pointFeature']['centroidDisp'] = [np.linalg.norm(centroid - v1).item(),
+                                                  np.linalg.norm(centroid - v2).item()]
+    ParsedEdge['pointFeature']['u'] = [0, 1]  # normalise to [0, 1]
+
     extrema = []
     if maxPoint is not None: extrema.append(np.array(maxPoint))
     if minPoint is not None: extrema.append(np.array(minPoint))
@@ -2931,8 +2946,8 @@ def ellipseParse(localCentroid, ParsedEdge, STEP_entities_):
     for ex_i, ex in enumerate(extrema):
         if not np.isclose(v1, ex).all() and not np.isclose(v2, ex).all():
             ParsedEdge['pointFeature']['xyz'].insert(-1, ex)
-            ParsedEdge['pointFeature']['centroidDisp'].insert(-1, np.linalg.norm(ex - localCentroid))
-            ParsedEdge['pointFeature']['u'].insert(-1, uArc[ex_i])  # check u proximity?
+            ParsedEdge['pointFeature']['centroidDisp'].insert(-1, np.linalg.norm(ex - localCentroid).item())
+            ParsedEdge['pointFeature']['u'].insert(-1, uArc[ex_i].item())  # check u proximity?
 
 
 
@@ -3484,17 +3499,17 @@ def BsplineCurveWithKnotsParse(localCentroid, ParsedEdge, STEP_entities_):
     if ParsedEdge.get('vertex2') is None:
         ParsedEdge['vertex2'] = np.array(BsplineKnotCurve.evaluate_single(1.))
 
-    maximaU = maxPointsU + minPointsU
+    extremaU = maxPointsU + minPointsU
     maximaPoints = maxPoints + minPoints
     if len(maximaPoints) > 0:
-        extremaUindex = np.argsort(maximaU)
-        maximaU = [maximaU[eui] for eui in extremaUindex]
+        extremaUindex = np.argsort(extremaU)
+        extremaU = [extremaU[eui] for eui in extremaUindex]
         maximaPoints = [maximaPoints[eui] for eui in extremaUindex]
 
         # because Newton-Raphson will converge on a tangent, separate max/min values may be identical
-        maxima_truth = [(maximaU[mu + 1] - maximaU[mu]) > eps_STEP_AP21 for mu in range(0, len(maximaU) - 1)]
+        maxima_truth = [(extremaU[mu + 1] - extremaU[mu]) > eps_STEP_AP21 for mu in range(0, len(extremaU) - 1)]
         maxima_truth = maxima_truth + [True, ]
-        maximaU = [mu for (mu, mt) in zip(maximaU, maxima_truth) if mt]
+        extremaU = [mu for (mu, mt) in zip(extremaU, maxima_truth) if mt]
         maximaPoints = [np.array(mp) for (mp, mt) in zip(maximaPoints, maxima_truth) if mt]
 
         # if vertex1 centroidDisp is close to u[0],
@@ -3504,12 +3519,12 @@ def BsplineCurveWithKnotsParse(localCentroid, ParsedEdge, STEP_entities_):
         vertex1centroidDisp = np.linalg.norm(ParsedEdge['vertex1'] - localCentroid)
         vertex2centroidDisp = np.linalg.norm(ParsedEdge['vertex2'] - localCentroid)
         if np.abs(vertex1centroidDisp - centroidDisp[0]) < eps_STEP_AP21:
-            maximaU.pop(0)
+            extremaU.pop(0)
             maximaPoints.pop(0)
         else:
             centroidDisp.insert(0, vertex1centroidDisp)
         if np.abs(vertex2centroidDisp - centroidDisp[-1]) < eps_STEP_AP21:
-            maximaU.pop(-1)
+            extremaU.pop(-1)
             maximaPoints.pop(-1)
         else:
             centroidDisp.append(vertex2centroidDisp)
@@ -3520,8 +3535,8 @@ def BsplineCurveWithKnotsParse(localCentroid, ParsedEdge, STEP_entities_):
     # maximaPoints.insert(-1, ParsedEdge['vertex2']) # ParsedEdge['pointFeature']['xyz'][-1])
     # ParsedEdge['pointFeature']['xyz'] = np.array([ParsedEdge['vertex1'], ] + maximaPoints + [ParsedEdge['vertex2'], ])
     ParsedEdge['pointFeature']['xyz'] = [ParsedEdge['vertex1'], ] + maximaPoints + [ParsedEdge['vertex2'], ]
-    ParsedEdge['pointFeature']['u'] = [0, ] + maximaU + [1]
-    ParsedEdge['pointFeature']['centroidDisp'] = centroidDisp
+    ParsedEdge['pointFeature']['u'] = [0., ] + [mu.item() for mu in extremaU] + [1.,]
+    ParsedEdge['pointFeature']['centroidDisp'] = [cd.item() for cd in centroidDisp] # .. is this really necessary?
 
     # no point adding maxima & minima fields here
 
@@ -3707,8 +3722,7 @@ def edgeSTEPparse(edgeInstance_, STEP_entities_):
     # must be recalculated on every centroid update
     ParsedEdge['pointFeature'] = {}
     # ParsedEdge['pointFeature']['xyz'] = [ParsedEdge['vertex1'], ParsedEdge['vertex2']]
-    # ParsedEdge['pointFeature']['centroidDisp'] = [np.linalg.norm(centroid - vertex1),
-    #                                               np.linalg.norm(centroid - vertex2)]
+    # ParsedEdge['pointFeature']['centroidDisp'] = [np.linalg.norm(centroid - vertex1), np.linalg.norm(centroid - vertex2)]
     # ParsedEdge['pointFeature']['u'] = [0, 1]  # normalise to [0, 1]
 
     ParsedEdge['typeName'] = STEP_entities_[ref2index(edgeCurveParams[2])].type_name
@@ -3884,12 +3898,12 @@ def revolvedSurfaceParse(AFS, c, minimaExtrema):
     # test if localCentroid is close to axisDir through axisPoint
     rotSymDisp = np.linalg.norm((centroid - axisPoint) - np.dot((centroid - axisPoint), normDir) * normDir)
 
-    Cdisp = np.dot((centroid - axisPoint), normDir)
-    Cproj = centroid - np.dot(Cdisp, normDir)  # point projected to plane along orthogonal
-    rotSymDisp2 = np.linalg.norm(Cproj - axisPoint)
-    print("rotSymDisp: " + str(rotSymDisp))
-    print("rotSymDisp2: " + str(rotSymDisp2))
-    print("offset centroid revolvedSurfaceParse untested, line 3869")
+    # Cdisp = np.dot((centroid - axisPoint), normDir)
+    # Cproj = centroid - np.dot(Cdisp, normDir)  # point projected to plane along orthogonal
+    # rotSymDisp2 = np.linalg.norm(Cproj - axisPoint)
+    # print("rotSymDisp: " + str(rotSymDisp))
+    # print("rotSymDisp2: " + str(rotSymDisp2))
+    # print("offset centroid revolvedSurfaceParse untested, line 3869")
 
     if rotSymDisp < eps_STEP_AP21:
         # no requirement to rotate centroid, surface maxima & minima are returned point maxima & minima from edgeParse
@@ -4000,8 +4014,8 @@ def sphereSurfaceParse(AFS, localCentroid, minimaExtrema=False):
         ParsedSurface['sphereFeatureFlag'] = True
 
         ParsedSurface['rotSymFeature'] = dict()
-        ParsedSurface['rotSymFeature']['rotSymCentre'] = centrePoint
-        ParsedSurface['rotSymFeature']['rotSymRadius'] = radius
+        ParsedSurface['rotSymFeature']['rotSymCentre'] = [centrePoint,]
+        ParsedSurface['rotSymFeature']['rotSymRadius'] = [radius,]
 
     else:
         sphereCentreCentroidDir = (centrePoint - localCentroid) / sphereCentroidOffset
@@ -4115,7 +4129,7 @@ def toroidSurfaceParse(AFS, localCentroid, minimaExtrema=False):
 
     if rotSymDisp < eps_STEP_AP21:
         ParsedEdge['rotSymFeature'] = dict()
-        ParsedEdge['rotSymFeature']['rotSymCentre'] = axisPoint
+        ParsedEdge['rotSymFeature']['rotSymCentre'] = [axisPoint,]
         # ParsedEdge['rotSymFeature']['rotSymRadius'] = radius
         # ParsedSurface['rotSymCentre'] = axisPoint
     else:
@@ -4471,9 +4485,9 @@ def coneSurfaceParse(AFS, localCentroid, minimaExtrema=False):
 
             if edgeMinimaCount % 2 == 0:
                 ParsedSurface['rotSymFeature'] = dict()
-                ParsedSurface['rotSymFeature']['rotSymCentre'] = coneMinimaCentrePoint
-                ParsedSurface['rotSymFeature']['rotSymRadius'] = np.linalg.norm(
-                    coneMinimaCentrePoint - apexPoint) * np.tan(semiAngle)
+                ParsedSurface['rotSymFeature']['rotSymCentre'] = [coneMinimaCentrePoint,]
+                ParsedSurface['rotSymFeature']['rotSymRadius'] = [np.linalg.norm(
+                    coneMinimaCentrePoint - apexPoint) * np.tan(semiAngle),]
                 # ParsedSurface['rotSymRadius'] = np.linalg.norm(coneMinimaCentrePoint - apexPoint) * np.tan(semiAngle)
                 # ParsedSurface['rotSymCentre'] = coneMinimaCentrePoint
 
@@ -4746,26 +4760,26 @@ def BSplineSurfaceWithKnotsParse(AFS, localCentroid, STEP_entities_, minimaExtre
     maxima = [True, ] * len(maxPoints) + [False, ] * len(minPoints)
     minima = [False, ] * len(maxPoints) + [True, ] * len(minPoints)
 
-    maximaUV = maxPointsUV + minPointsUV
+    extremaUV = maxPointsUV + minPointsUV
     maximaPoints = maxPoints + minPoints
     if len(maximaPoints) > 1:
         # create explicit dtype fields to permit sorting via u, then v
-        maximaUV_field = maximaUV.ravel().view(dtype=[('u', maximaUV.dtype), ('v', maximaUV.dtype)])
-        extremaUVindex = np.argsort(maximaUV_field, order=('u', 'v'))
-        maximaUV = [maximaUV[euvi] for euvi in extremaUVindex]
+        extremaUV_field = extremaUV.ravel().view(dtype=[('u', extremaUV.dtype), ('v', extremaUV.dtype)])
+        extremaUVindex = np.argsort(extremaUV_field, order=('u', 'v'))
+        extremaUV = [extremaUV[euvi] for euvi in extremaUVindex]
         maximaPoints = [maximaPoints[euvi] for euvi in extremaUVindex]
         maxima = [maxima[euvi] for euvi in extremaUVindex]
         minima = [minima[euvi] for euvi in extremaUVindex]
 
         # because Newton-Raphson will converge on a tangent, separate max/min values may be identical
-        maxima_truth = [np.allclose(maximaUV[mu + 1], maximaUV[mu], eps_STEP_AP21) for mu in
-                        range(0, len(maximaUV) - 1)]
+        maxima_truth = [np.allclose(extremaUV[mu + 1], extremaUV[mu], eps_STEP_AP21) for mu in
+                        range(0, len(extremaUV) - 1)]
         maxima_truth = maxima_truth + [False, ]
-        maximaUV = [mu for (mu, mt) in zip(maximaUV, maxima_truth) if not mt]
+        extremaUV = [mu for (mu, mt) in zip(extremaUV, maxima_truth) if not mt]
         maximaPoints = [mp for (mp, mt) in zip(maximaPoints, maxima_truth) if not mt]
 
     ParsedSurface['pointFeature']['xyz'] = maximaPoints
-    ParsedSurface['pointFeature']['uv'] = maximaUV
+    ParsedSurface['pointFeature']['uv'] = extremaUV
     ParsedSurface['pointFeature']['centroidDisp'] = [np.linalg.norm(mp - localCentroid) for mp in maximaPoints]
     ParsedSurface['pointFeature']['maxima'] = maxima
     ParsedSurface['pointFeature']['minima'] = minima
@@ -5303,7 +5317,7 @@ def getRotSymFeatures(AFS):
 
         saus = [saus[ads] for ads in axisDispsSorted]
 
-        axisSet['centreCentroidDisp'] = [centreDisps[ads] for ads in axisDispsSorted]
+        axisSet['centreCentroidDisp'] = [centreDisps[ads].item() for ads in axisDispsSorted]
         axisSet['rotSymCentre'] = [allRotSymFeatures['rotSymCentre'][s] for s in saus]
         axisSet['rotSymRadius'] = [allRotSymFeatures['rotSymRadius'][s] for s in saus]
         # check neighbours for max/min determination (equality := min)
