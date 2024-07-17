@@ -29,8 +29,8 @@ from geomdl import utilities
 #from geomdl import evaluators
 # import copy
 
-from collections import namedtuple  # PyCharm bug will flag this as type error
-Point = namedtuple("Point", "x y z")
+# from collections import namedtuple  # PyCharm bug will flag this as type error
+# Point = namedtuple("Point", "x y z")
 
 import numpy as np
 
@@ -41,11 +41,6 @@ eps_STEP_AP21 = 1e-6  # STEP precision seems to end here
 
 # eps_bspline = 1E-10 # precision used in bspline/NURB surface subroutines
 # machine_EPS = np.finfo(float).eps # float comparison
-
-# need a precision factor that reflects increasing accuracy arising from iterative calculations of centroid --------------------------------------<<<<<<<<<<<<<<<<<
-# also scale factor affecting numerical precision
-# STEP seems to be E-6 decimal places at best
-iterativeScaledPrecision = 1e-4  # for testing ------------------------------------------------
 
 
 def FreeCADpointSyntax(A, color=(0., 0., 0.)):
@@ -148,8 +143,8 @@ def rotationMatrix(axis, theta):
 def arrayTypeCast(xyz):
     if type(xyz) == list:
         xyz = np.array([xyz[0], xyz[1], xyz[2]])
-    elif type(xyz) == Point:
-        xyz = np.array([xyz.x, xyz.y, xyz.z])
+    # elif type(xyz) == Point:
+    #     xyz = np.array([xyz.x, xyz.y, xyz.z])
     elif type(xyz) == np.ndarray:
         pass
     else:
@@ -201,9 +196,7 @@ def medianOfFeaturePoints(Surfaces):
     return medianPoint(outermostPoints)
 
 
-# does one find a centroid through axis-intersection?
-# a number of axes that pass through a common point?
-# equidistant corners?
+
 def medianPoint(pointArray):
     """
     Returns centroid determined as the median of cartesian values in an input array of points
@@ -257,50 +250,45 @@ def pointDisp(p1, p2):
 #     else:
 #         raise Exception("{0} is not a readable filepath".format(filePath))
 
-primitivesDir = os.path.normpath(
-    r"/media/foobert/Dell2HDD/PY_DELL2/SWKS_Rhino_compare_circle/primitives"
-)
-primitivesDir = os.path.normpath(
-    r"/home/foobert/STEP_test_files/primitives"
-)
-# testDir = os.path.normpath(
-#     r"/home/foobert/STEP_test_files"
-# )
+
 testDir = os.path.normpath(
     r"/media/foobert/Dell2HDD/STEP_test_files"
 )
+primitivesDir = os.path.normpath(
+    testDir + r"/primitives"
+)
 
-# filepath = primitivesDir + "/Cube/unit_cube_inc8.0_blend.06.stp"
-# filepath = primitivesDir + "/Cylinder/unit_cyl.stp"
-# filepath = primitivesDir + "/Primitive_Cone-PartCone.step"
+# filepath = primitivesDir + "Cube/unit_cube_inc8.0_blend.06.stp"
+# filepath = primitivesDir + "Cylinder/unit_cyl.stp"
+# filepath = primitivesDir + "Primitive_Cone-PartCone.step"
 
-#filepath = testDir + "/RR_STEP_test_1A.step" # pass.. I think, no representation available
-#filepath = testDir + "/RR_STEP_test_N.step" # fail, no trimmed_curve circle code================
-# filepath = testDir + "/00000001_1ffb81a71e5b402e966b9341_step_000.step"
-# filepath = testDir + "/00000010_b4b99d35e04b4277931f9a9c_step_000.step"
-# filepath = testDir + "/LEA-M8F(AP203).STEP"
+#filepath = testDir + "RR_STEP_test_1A.step" # pass.. I think, no representation available
+#filepath = testDir + "RR_STEP_test_N.step" # fail, no trimmed_curve circle code================
+# filepath = testDir + "00000001_1ffb81a71e5b402e966b9341_step_000.step"
+# filepath = testDir + "00000010_b4b99d35e04b4277931f9a9c_step_000.step"
+#filepath = testDir + os.sep + "LEA-M8F(AP203).STEP" # too large to debug?
 
-filepath = testDir + "/9341_step_000.step" #FAIL - reverse list from spline=======================
-filepath = testDir + "/revolve_spline.step"
+#filepath = testDir + "9341_step_000.step" #FAIL - reverse list from spline=======================
+#filepath = testDir + "revolve_spline.step" #PASS
 
-# filepath = testDir + "/simpleSpindle1.step"
-# filepath = testDir + "/Maltese_cruciform.step"
-# filepath = testDir + "/TiltedConeAP203.step" # pass
-# filepath = testDir + "/OffsetCone_AP214_noPlacement_noParametric.step"
-# filepath = testDir + "/OffsetCone-PartCone.step"
-# filepath = testDir + "/TiltedCylinder4_AP214_PC.step"
-# filepath = testDir + "/Cylinder5_AP214_PC.step"
-# filepath = testDir + "/DrexelBlendedCylinder_topOvalPlane.step"
+filepath = testDir + "/simpleSpindle1.step" #PASS
+# filepath = testDir + "Maltese_cruciform.step" #PASS
+# filepath = testDir + "TiltedConeAP203.step" # pass
+# filepath = testDir + "OffsetCone_AP214_noPlacement_noParametric.step"
+# filepath = testDir + "OffsetCone-PartCone.step"
+# filepath = testDir + "TiltedCylinder4_AP214_PC.step"
+# filepath = testDir + "Cylinder5_AP214_PC.step"
+# filepath = testDir + "DrexelBlendedCylinder_topOvalPlane.step"
 # DrexelBlendedCylinder_curvedBlend.step
-# filepath = testDir + "/DrexelBlendedCylinder_midriffTube.step"
-# filepath = testDir + "/TiltedCylinder2.step"
-#filepath = testDir + "/TiltedCylinder3.step" #PASS
-# filepath = primitivesDir + "/Cube/unit_cube.stp"
-#filepath = testDir + "/Drexel_blended_ellipse_plain.step" # fail, no surfaces ellipse
-#filepath = testDir + "/Drexel_blended_cylinder.step" # pass
-# filepath = testDir + "/DrexelBlendedCylinder_curvedBlend.step" # pass
-#filepath = testDir + "/TiltedCylinder.step" # pass
-# filepath = testDir + "/Synth_ellipse_plain.step"
+# filepath = testDir + "DrexelBlendedCylinder_midriffTube.step"
+# filepath = testDir + "TiltedCylinder2.step"
+#filepath = testDir + "TiltedCylinder3.step" #PASS
+# filepath = primitivesDir + "Cube/unit_cube.stp"
+#filepath = testDir + "Drexel_blended_ellipse_plain.step" # fail, no surfaces ellipse
+#filepath = testDir + "Drexel_blended_cylinder.step" # pass
+# filepath = testDir + "DrexelBlendedCylinder_curvedBlend.step" # pass
+#filepath = testDir + "TiltedCylinder.step" # pass
+# filepath = testDir + "Synth_ellipse_plain.step"
 
 print(filepath)
 
