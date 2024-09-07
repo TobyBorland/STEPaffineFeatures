@@ -44,7 +44,7 @@ eps_STEP_AP21 = 1e-6  # STEP precision seems to end here
 
 
 def FreeCADpointSyntax(A, color=(0., 0., 0.)):
-    '''print the instructions to create a FreeCAD model of a list of points'''
+    """print the instructions to create a FreeCAD model of a list of points"""
     print('import FreeCAD as App')
     print('import Draft')
     for i, xyz in enumerate(A):
@@ -167,8 +167,9 @@ def pol2cart(rho, phi):
 
 def array3x1match(a, A, atol=eps):
     '''test whether a numpy array of 3 elements (a) exists within a list of 3 element arrays'''
-    T = [np.isclose(a[0], b[0], atol=eps) and np.isclose(a[1], b[1], atol=eps) and np.isclose(a[2], b[2], atol) for
-         b in A]
+    T = [np.isclose(a[0], b[0], atol=eps) and \
+         np.isclose(a[1], b[1], atol=eps) and \
+         np.isclose(a[2], b[2], atol) for b in A]
     return any(T)
 
 #debugA=[]
@@ -1814,567 +1815,8 @@ def curveEnclosingRectangle(v1, v2, centreP, normV, radius):
     return [p1, p2, p3, p4]
 
 
-# ================================================STEP stepcode.Part21 parsing related functions
-def STEPlabelOffset(i, refStrList):
-    '''account for missing text label string in early STEP versions'''
-    if isinstance(refStrList[0], str):
-        if refStrList[0]:
-            if refStrList[0][0] == '#':
-                return i - 1
-            else:
-                return i
-        else:
-            return i
-    else:
-        return i - 1
 
 
-def cleanSubRefs(refStr):
-    '''
-    Flatten parameter sets and extract #d string references from stepcode parser
-    :param refSt:
-    :return list of reference strings
-    '''
-
-    flattenList = (
-        lambda irregularL: [e for i in irregularL for e in flattenList(i)]
-        if type(irregularL) is list
-        else [irregularL]
-    )
-    sp = flattenList(refStr)  # flatten sublists
-    sp = [i for i in sp if isinstance(i, str)]
-    sp = [re.match("#[0-9]+", i) for i in sp]
-    sp = [i.string for i in sp if i is not None]
-    return sp
-
-
-def ref2index(s): return int(s[1:]) - 1
-
-
-def CP2point(pointRefString):
-    '''
-    Return np.array of STEP AP21 CARTESIAN_POINT, DIRECTION, VECTOR
-
-    :param pointRefString: STEP reference string
-    :return np.array of STEP AP21 [CARTESIAN_POINT, DIRECTION, VECTOR]
-    '''
-
-    # assert STEPobject[ref2index(pointRefString)].type_name == "CARTESIAN_POINT"
-    # R3 = STEPobject[ref2index(pointRefString)].params[1]
-    R3 = STEPobj[ref2index(pointRefString)].params[-1]
-    return np.array([R3[0], R3[1], R3[2]])
-
-
-def axis1Placement(strRef):
-    '''
-    Process STEP AXIS1_PLACEMENT entity
-    axis: the direction of the axis.
-
-    :param strRef: STEP reference string
-    :return axisPoint, normDir, refDir
-    '''
-    # STEP ISO 10303-42 notes, EXPRESS descriptor
-    # ENTITY Axis1_placement
-    #   SUBTYPE OF (Axis_placement);
-    #   axis : OPTIONAL Direction;
-
-    # Attribute definitions:
-    # axis: the direction of the axis.
-    # The dimensionality of the Axis_placement_2d shall be 3.
-    # The number of dimension ratios of the axis shall be 3.
-
-    if STEPobj[ref2index(strRef)].type_name != 'AXIS1_PLACEMENT':
-        print("axis2Placement3D assignment failure: " + STEPobj[ref2index(strRef)].type_name)
-        return None
-
-    axisPoint = None
-    normDir = None
-    subRefList = cleanSubRefs(STEPobj[ref2index(strRef)].params)
-
-    if (STEPobj[ref2index(subRefList[0])].type_name == 'CARTESIAN_POINT'):
-        axisPoint = CP2point(subRefList[0])
-
-        if len(subRefList) > 1:
-            if (STEPobj[ref2index(subRefList[1])].type_name == 'DIRECTION'):
-                normDir = CP2point(subRefList[1])
-
-    return axisPoint, normDir
-
-
-def axis2Placement3D(strRef):
-    '''
-    Process STEP AXIS2_PLACEMENT_3D entity
-    axis: the Direction that defines the second axis of the Axis_placement. (Y or V, not normal)
-    ref_direction: the direction used to determine the direction of the local X axis. (or U)
-
-    :param strRef: STEP reference string
-    :return
-    '''
-    # STEP ISO 10303-42 notes, EXPRESS descriptor
-    # process STEP AXIS2_PLACEMENT_3D entity
-    # axis: the Direction that defines the second axis of the Axis_placement. (Y or V, not normal)
-    # The value of this attribute need not be specified.
-    # ref_direction: the direction used to determine the direction of the local X axis. (or U)
-    # The value of this attribute need not be specified.
-    # If axis or ref_direction is omitted, these directions are taken from the geometric coordinate system
-    # If both axis and ref_direction are provided then the vector product of axis and ref_direction shall not be a null vector.
-
-    if STEPobj[ref2index(strRef)].type_name != 'AXIS2_PLACEMENT_3D':
-        print("axis2Placement3D assignment failure: " + STEPobj[ref2index(strRef)].type_name)
-        return None
-
-    axisPoint = None
-    normDir = None
-    refDir = None
-    subRefList = cleanSubRefs(STEPobj[ref2index(strRef)].params)
-
-    if (STEPobj[ref2index(subRefList[0])].type_name == 'CARTESIAN_POINT'):
-        axisPoint = CP2point(subRefList[0])
-
-        if len(subRefList) > 1:
-            if (STEPobj[ref2index(subRefList[1])].type_name == 'DIRECTION'):
-                normDir = CP2point(subRefList[1])
-
-                # relying on order specified
-                # https://www.steptools.com/stds/smrl/data/modules/elemental_geometric_shape/sys/4_info_reqs.htm#elemental_geometric_shape_arm.axis_placement
-                if len(subRefList) > 2:
-                    if (STEPobj[ref2index(subRefList[2])].type_name == 'DIRECTION'):
-                        refDir = CP2point(subRefList[2])
-
-    return axisPoint, normDir, refDir
-
-
-# def axis2Placement3D(strRef):
-#     '''
-#     Process STEP AXIS2_PLACEMENT_3D entity
-#     axis: the Direction that defines the second axis of the Axis_placement. (Y or V, not normal)
-#     ref_direction: the direction used to determine the direction of the local X axis. (or U)
-#
-#     :param strRef: STEP reference string
-#     :return axisPoint, auxDir, refDir
-#     '''
-#     # process STEP AXIS2_PLACEMENT_3D entity
-#     assert STEPobj[ref2index(strRef)].type_name == 'AXIS2_PLACEMENT_3D'
-#     # D = {}
-#
-#     if '#' in STEPobj[ref2index(strRef)].params[0]:  # check for name string
-#         # not a robust approach as certain values are optional
-#         offset = 0
-#     else:
-#         offset = 1
-#
-#     axisPoint = STEPobj[ref2index(strRef)].params[offset]
-#     assert STEPobj[ref2index(axisPoint)].type_name == 'CARTESIAN_POINT'
-#     axisPoint = CP2point(axisPoint)
-#     # D['axisPoint'] = axisPoint
-#
-#     auxDir = STEPobj[ref2index(strRef)].params[offset + 1]
-#     assert STEPobj[ref2index(auxDir)].type_name == 'DIRECTION'
-#     auxDir = CP2point(auxDir)
-#     # D['auxDir'] = auxDir
-#
-#     refDir = STEPobj[ref2index(strRef)].params[offset + 2]
-#     assert STEPobj[ref2index(refDir)].type_name == 'DIRECTION'
-#     refDir = CP2point(refDir)
-#     # D['refDir'] = refDir
-#
-#     return axisPoint, auxDir, refDir
-
-
-# search for cartesian points & check if points correspond with referenced curve/edge vertexes
-
-# TRIMMED_CURVE
-# ENTITY trimmed_curve
-# SUBTYPE OF (bounded_curve);
-# basis_curve : curve;
-# trim_1 : SET[1:2] OF trimming_select;
-# trim_2 : SET[1:2] OF trimming_select;
-# sense_agreement : BOOLEAN;
-# master_representation : trimming_preference;
-
-# provides either parametric, point or angle end points to arc
-# can be used to update vertex1/2
-
-
-# local STEP (AdvancedFaceSurfaces) data assistant functions
-
-
-def insideOutsideSurfaceTest(c, mPoint, AFSobj):
-    '''
-    Project ray from centroid (c) toward mPoint in order to determine whether this ray intersects the surface defined in AFSobj
-    The angle of edge vertices of an intercepted face are calculated with respect to this point and summed
-    Return true if point within surface edges ("Angle Sum Algorithm")
-    No accommodation for holes in surface
-    :param AFSobj: parsed surfaces data object
-    :param c: estimated surface median point based on extrema points identified
-    :param mPoint:
-    :return bool True if within surface
-    '''
-
-
-    def vertexAngle(mPoint, v1, v2):
-        # project vertex points to a plane defined by mPoint and sNorm
-        m_v1 = v1 - mPoint
-        p_v1 = v1 - np.dot(m_v1, sNorm) * sNorm
-
-        m_v2 = v2 - mPoint
-        p_v2 = v2 - np.dot(m_v2, sNorm) * sNorm
-
-        mppv1 = p_v1 - mPoint
-        mppv2 = p_v2 - mPoint
-
-        sign = np.sign(np.cross(mppv1, mppv2).dot(sNorm))
-
-        v1v2cos = np.dot(mppv1, mppv2) / (np.linalg.norm(mppv1) * np.linalg.norm(mppv2))  # cosine
-
-        if np.abs(v1v2cos) < eps_STEP_AP21:
-            print("insideOutsideSurfaceTest(): edge warning")
-
-        # zero value implies mPoint lies on edge
-        return (sign * np.arccos(np.clip(v1v2cos, -1, 1)))
-
-    sNormDen = np.linalg.norm(mPoint - c)
-    if sNormDen > eps_STEP_AP21:
-        sNorm = (mPoint - c) / sNormDen
-    else:
-        # point is at centroid, find normal from provided surface parameters
-        print("insideOutsideSurfaceTest(): median centroid at surface, surface normal substituted")
-        # add offset to everything and try again?
-        # mirror mPoint around surface normal? just use surface normal instead? -> requires earlier calc of axis2Placement3D
-        # _1=1
-        sNorm = AFSobj['ParsedSurface']['normDir']
-
-    edgeTotalAngle = 0
-    vertexLoopCount = 0
-    for edge in AFSobj['outerBoundEdgeLoop']:
-        v1 = edge['vertex1']
-        v2 = edge['vertex2']
-
-        # #if not np.isclose(v1, v2).all():
-        # if edge['vertex1ref'] == edge['vertex2ref']: # loop, discard
-        #     if edge['typeName'] == 'CIRCLE' or edge['typeName'] == 'B_SPLINE_CURVE_WITH_KNOTS' or edge['typeName'] == 'ELLIPSE':
-        #         vertexLoopCount +=1 # should be discarded if point is not within loop?
-
-        # catch spline and convert to polyline vertices
-        if edge['typeName'] == 'B_SPLINE_CURVE_WITH_KNOTS':
-            if edge['vertex1ref'] == edge['vertex2ref']:  # loop, discard
-                vertexLoopCount += 1  # should be discarded if point is not within loop?
-            else:
-                splinePolyline, splinePolylineU = splineToPolyline(edge['BsplineKnotCurve'], curveSampleFactor=1)
-                # find closest point on spline and ensure that this is not mPoint
-
-                # nearestSplinePointU = splineCurveMinMaxPointDisp(edge['BsplineKnotCurve'], mPoint, maxSearch=False)
-
-                # if mPoint[0]==0: # and mPoint[1]== -0.30397087 and mPoint[2]==-16.61759168:
-                #     _1=1
-                nearestSplinePointU = BsplineCurveExtremaDisp(edge['BsplineKnotCurve'],
-                                                              mPoint,
-                                                              maxSearch=False,
-                                                              uv_xyz=True)
-
-                if len(nearestSplinePointU) == 0: # usually means mPoint is closest to endpoints
-                    #
-                    if np.linalg.norm(mPoint - v1) <= np.linalg.norm(mPoint - v2):
-                        nearestSplinePoint = v1
-                        nearestSplinePointU = 0.
-                    else:
-                        nearestSplinePoint = v2
-                        nearestSplinePointU = 1.
-                else:
-                    nearestSplinePoint = np.array(edge['BsplineKnotCurve'].evaluate_list(nearestSplinePointU))
-
-                if np.linalg.norm(mPoint - nearestSplinePoint) < eps_STEP_AP21:
-                    print('insideOutsideSurfaceTest(): spline edge warning - ignore polyline warnings')
-                if not any([np.isclose(nearestSplinePointU, splU) for splU in splinePolylineU]):
-                    # has to be ordered correctly
-                    splinePolylineU = np.insert(splinePolylineU, splinePolylineU.searchsorted(nearestSplinePointU),
-                                                nearestSplinePointU)
-                    iu = np.argmin(np.abs(splinePolylineU - nearestSplinePointU))
-                    splinePolyline = [np.array(spl) for spl in splinePolyline]
-                    splinePolyline = np.insert(splinePolyline, iu, nearestSplinePoint, axis=0)
-                for i in range(len(splinePolyline) - 1):
-                    edgeTotalAngle += vertexAngle(mPoint, splinePolyline[i], splinePolyline[i + 1])
-                # _1=1
-
-        # account for circle or ellipse arcs, find nearest point on arc to mPoint,
-        # add a point there, effectively converting arc into two segments
-        elif (edge['typeName'] == 'CIRCLE'):
-            if edge['vertex1ref'] == edge['vertex2ref']:  # loop, discard
-                vertexLoopCount += 1  # should be discarded if point is not within loop?
-            else:
-                nearArcPoint, _ = pointCircleMinMaxDisp(mPoint,
-                                                        edge['axisPoint'],
-                                                        edge['normDir'],
-                                                        edge['radius'])
-                if pointInArc(nearArcPoint,
-                              v1, v2,
-                              edge['refDir'],
-                              edge['auxDir'],
-                              edge['normDir'],
-                              edge['axisPoint'],
-                              rotSym=False):
-                    edgeTotalAngle += vertexAngle(mPoint, v1, nearArcPoint)
-                    edgeTotalAngle += vertexAngle(mPoint, nearArcPoint, v2)
-                    print("untested circle arc division")
-
-        elif edge['typeName'] == 'ELLIPSE':
-            if edge['vertex1ref'] == edge['vertex2ref']:  # loop, discard
-                vertexLoopCount += 1  # should be discarded if point is not within loop?
-            else:
-                nearArcPoint, _ = pointEllipseMinMaxDisp(mPoint,
-                                                         edge['axisPoint'],
-                                                         edge['refDir'],
-                                                         edge['auxDir'],
-                                                         edge['normDir'],
-                                                         edge['majorRadius'],
-                                                         edge['minorRadius'],
-                                                         interior=False)
-                if pointInArc(nearArcPoint,
-                              v1, v2,
-                              edge['refDir'],
-                              edge['auxDir'],
-                              edge['normDir'],
-                              edge['axisPoint'],
-                              rotSym=False):
-                    edgeTotalAngle += vertexAngle(mPoint, v1, nearArcPoint)
-                    edgeTotalAngle += vertexAngle(mPoint, nearArcPoint, v2)
-                    print("untested ellipse arc division")
-
-        else:
-            # project vertex points to a plane defined by mPoint and sNorm
-            edgeTotalAngle += vertexAngle(mPoint, v1, v2)
-
-    # surfaces that curve > 90deg can give false negative, assume inside/outside test is to detect nearest surface
-
-    # exception for cylinder, conic, sphere
-    if (AFSobj['SurfaceTypeName'] in ['CYLINDRICAL_SURFACE', ]) or (AFSobj['SurfaceTypeName'] in ['CONICAL_SURFACE', ]):
-        # edges angle sum to zero from 2x loops and seam edge ---------------------needs testing
-        if (np.abs(edgeTotalAngle % (2 * np.pi)) < eps_STEP_AP21) and (
-                vertexLoopCount >= 1):  # (len(AFSobj['outerBoundEdgeLoop']) < 4):
-            # only need to determine whether point lies within section of cone axis within cone as circle or ellipse loops at ends signify
-            #   fully enclosed surface
-            # vertex angles that sum to zero will still indicate a crossing, for either CW, or ACW direction configuration
-
-            # if method is uniquely used for closest surface point on a plane encompassing projection and cylinder axis
-            # can then ignore far-side intersection
-
-            # ?? find nearest points on circles/ellipses/bsplines at each curved edge, then test if both points are to one side??
-            curvedEdgeNearestPoint = []
-            normDir = np.array(AFSobj['ParsedSurface']['normDir'])
-            for edge in AFSobj['outerBoundEdgeLoop']:
-                if edge['typeName'] == 'CIRCLE':
-                    nearArcPoint, _ = pointCircleMinMaxDisp(mPoint,
-                                                            edge['axisPoint'],
-                                                            edge['normDir'],
-                                                            edge['radius'])
-                    curvedEdgeNearestPoint.append(np.array(nearArcPoint))
-
-                elif edge['typeName'] == 'ELLIPSE':
-                    nearArcPoint, _ = pointEllipseMinMaxDisp(mPoint,
-                                                             edge['axisPoint'],
-                                                             edge['refDir'],
-                                                             edge['auxDir'],
-                                                             edge['normDir'],
-                                                             edge['majorRadius'],
-                                                             edge['minorRadius'])
-                    curvedEdgeNearestPoint.append(np.array(nearArcPoint))
-
-                elif edge['typeName'] == 'B_SPLINE_CURVE_WITH_KNOTS':
-
-                    # should go to a plane-curve intersection function
-
-                    # define plane through axisPoint, mPoint, normDir
-                    axisPoint = np.array(AFSobj['ParsedSurface']['axisPoint'])
-                    # normDir = np.array(AFSobj['ParsedSurface']['normDir'])
-                    planeNorm = np.cross((mPoint - axisPoint), normDir)
-                    orthoPlane = np.cross(planeNorm, normDir)
-                    mSign = np.dot(axisPoint - mPoint, orthoPlane) > 0
-                    sPolyline, sPolylineU = splineToPolyline(edge['BsplineKnotCurve'], curveSampleFactor=1)
-                    nearArcPointSet = []
-                    U = []
-
-                    for i in range(0, len(sPolyline) - 1):
-                        nearArcPoint = intersectSegmentPlane(np.array(sPolyline[i]),
-                                                             np.array(sPolyline[i + 1]),
-                                                             planeNorm,
-                                                             mPoint)
-                        if nearArcPoint is not None:
-                            nearArcPointSet.append(nearArcPoint)
-                            U.append(i)
-
-                    # determine intersection on mPoint side of plane
-                    # test whether vector from mPoint to intersection is parallel with normDir
-                    if len(nearArcPointSet) == 0:
-                        break
-                    elif len(nearArcPointSet) == 1:
-                        nearArcPoint = nearArcPointSet[0]
-                        iu = U[0]
-                    else:
-                        for i_naps, naps in enumerate(nearArcPointSet):
-                            napsSign = np.dot(axisPoint - naps, orthoPlane) > 0
-                            if napsSign == mSign:
-                                # if np.isclose(np.cross(mPoint - naps, normDir), np.array([0., 0., 0.]), eps_STEP_AP21).all():
-                                nearArcPoint = naps
-                                iu = U[i_naps]
-
-                    # binary search over u-interval
-                    if iu + 1 > len(sPolylineU):
-                        _1 = 1
-                    hiU = sPolylineU[iu + 1]
-                    hiP = sPolyline[iu + 1]
-                    loU = sPolylineU[iu]
-                    loP = sPolyline[iu]
-
-                    while (hiU - loU) > eps_STEP_AP21:  # 1E-10: #==================================================
-                        midU = loU + (hiU - loU) / 2
-                        midP = np.array(edge['BsplineKnotCurve'].evaluate_single(midU))
-                        nearArcPoint = intersectSegmentPlane(loP, midP, planeNorm, mPoint)
-                        if nearArcPoint is not None:
-                            hiP = midP
-                            hiU = midU
-                        else:
-                            nearArcPoint = intersectSegmentPlane(midP, hiP, planeNorm, mPoint)
-                            if nearArcPoint is not None:
-                                loP = midP
-                                loU = midU
-                            else:
-                                print("fail")
-
-                    curvedEdgeNearestPoint.append(np.array(nearArcPoint))
-
-            if len(curvedEdgeNearestPoint) > 2:
-                print("insideOutsideSurfaceTest cylinder/conical fail")
-                print(curvedEdgeNearestPoint)
-                print(mPoint)
-            if len(curvedEdgeNearestPoint) < 2:
-                # print("insideOutsideSurfaceTest cylinder/conical fail")
-                return False
-            # project intersections to plane where axis is normal (normDir), through mPoint
-            # if all points have same sign, all are on same side
-            if not all([np.dot(mPoint - cenp, normDir) > 0 for cenp in curvedEdgeNearestPoint]):
-                return True
-            else:
-                return False
-
-    # if AFSobj['SurfaceTypeName'] in ['CONICAL_SURFACE',]:
-    #     # edges angle sum to zero from 2x loops and seam edge ---------------------needs testing
-    #     if (np.abs(edgeTotalAngle) < eps_STEP_AP21) and (vertexLoopCount == 2): # (len(AFSobj['outerBoundEdgeLoop']) < 4):
-    #         # only need to determine whether point lies within section of cone axis within cone
-    #         return True
-    #     else:
-    #         return False
-
-    if AFSobj['SurfaceTypeName'] in ['PLANE', ]:  # full circle
-        if (np.abs(edgeTotalAngle) < eps_STEP_AP21) and (len(AFSobj['outerBoundEdgeLoop']) < 2):
-            return True
-        elif ((np.abs(edgeTotalAngle) % (2 * np.pi)) < eps_STEP_AP21) and (len(AFSobj['outerBoundEdgeLoop']) > 1):
-            return True
-        else:
-            return False
-
-    # may have to take VOR into account depending on orientation of surface,
-    # e.g. concave or convex spherical surface
-    # assume that minima point is always closest to centroid?
-    # if not edge['VOR']:
-    if not AFSobj['SurfaceNormalOutwards']:
-        if (edgeTotalAngle % (2 * np.pi)) < eps_STEP_AP21 and (edgeTotalAngle > 0):
-            return True
-        else:
-            return False
-    else:
-        if (edgeTotalAngle % (2 * np.pi)) < eps_STEP_AP21 and (edgeTotalAngle < 0):
-            return True
-        else:
-            return False
-
-
-
-testDir = os.path.normpath(
-    r"/media/foobert/Dell2HDD/STEP_test_files"
-)
-primitivesDir = os.path.normpath(
-    testDir + r"primitives"
-)
-
-# filepath = primitivesDir + "Cube/unit_cube_inc8.0_blend.06.stp"
-
-# filepath = primitivesDir + "Cylinder/unit_cyl.stp"
-# filepath = primitivesDir + "Primitive_Cone-PartCone.step"
-
-#filepath = testDir + "RR_STEP_test_1A.step" # pass.. I think, no representation available
-#filepath = testDir + "RR_STEP_test_N.step" # fail, no trimmed_curve circle code================
-# filepath = testDir + "00000001_1ffb81a71e5b402e966b9341_step_000.step"
-# filepath = testDir + "00000010_b4b99d35e04b4277931f9a9c_step_000.step"
-#filepath = testDir + os.sep + "LEA-M8F(AP203).STEP" # too large to debug?
-
-#filepath = testDir + "9341_step_000.step" #FAIL - reverse list from spline=======================
-#filepath = testDir + "revolve_spline.step" #PASS
-
-# filepath = testDir + "/simpleSpindle1.step" #PASS
-# filepath = testDir + "Maltese_cruciform.step" #PASS
-# filepath = testDir + "TiltedConeAP203.step" # pass
-filepath = "OffsetCone_AP214_noPlacement_noParametric.step"
-#filepath = "OffsetCone-PartCone.step" #PASS2
-#filepath = "TiltedCylinder4_AP214_PC.step" #PASS2
-#filepath = "TiltedCylinder5-AP214_draft.step" #PASS2
-#filepath = "TiltedCylinder4c-AP203-ESOP.step" #PASS2
-#filepath = "Cylinder5_AP214_PC.step" #PASS2
-#filepath = "DrexelBlendedCylinder_topOvalPlane.step" #PASS2
-#filepath = "DrexelBlendedCylinder_curvedBlend.step" #PASS2
-#filepath = "DrexelBlendedCylinder_midriffTube.step" #PASS2 - note disparity between ellipse minima and vertexes
-
-# can a minima exist on an NURB surface edge? test all local NURB boundary minima against centroid disp??
-
-#filepath = "TiltedCylinder2.step" #PASS2
-#filepath = "TiltedCylinder3.step" #PASS2
-#filepath = "primitives/Cube/unit_cube.stp" # pass2
-#filepath = "Drexel_blended_ellipse_plain.step" # fail, no surfaces ellipse
-#filepath = "Drexel_blended_cylinder.step" # pass2
-#filepath = "DrexelBlendedCylinder_curvedBlend.step" # pass2
-#filepath = "TiltedCylinder.step" # pass2
-#filepath = "Synth_ellipse_plain.step" # pass (no Advanced Face Surface)
-
-#filepath = primitivesDir + os.sep + "Cube/unit_cube.stp" #PASS2
-# OFF format
-#filepath = testDir + "testOFF.off"
-
-filepath = testDir + os.sep + filepath
-print(filepath)
-
-try:
-    # filepath sanity check
-    checkPath = glob.glob(filepath)
-    if len(checkPath) != 1:
-        raise Exception("pathname failure")
-    else:
-        with open(filepath) as f:
-            STEPdata = f.read()
-except:
-    raise Exception("file failure")
-
-def parseSTEPstr(s):
-    # following operations unique to stepcode.Part21 Parser
-    s = s.replace(";\n", ";;")
-    s = s.replace("\n", "")
-    s = s.replace(";;", ";\n")
-
-    P = Parser()
-    # model = P.parse(/home/foobert/.config/JetBrains/PyCharmCE2023.1/scratches/simple_schema.exp)
-    model = P.parse(s)
-    SO = model.sections[0].entities
-
-    # fixing step files with non-contiguous line and #ref indices
-    if ref2index(SO[-1].ref) is not len(SO):
-        SO.sort(key=lambda x: int(x.ref[1:]))
-        padded_SO = [0] * int(SO[-1].ref[1:])
-        for ss in SO:
-            padded_SO[ref2index(ss.ref)] = ss
-        #SO = padded_SO
-
-    return padded_SO
-
-
-STEPobj = parseSTEPstr(STEPdata)
 
 
 # The geometry used in the definition of the face shall be restricted.
@@ -2457,62 +1899,6 @@ def segmentParse(c, ParsedEdge, calcExtrema=False):
             ParsedEdge['pointFeature']['centroidDisp'].insert(1, minPointCentroidDisp)
             u = np.linalg.norm(minPoint - ParsedEdge['vertex1']) / np.linalg.norm(ParsedEdge['vertex2'] - ParsedEdge['vertex1'])
             ParsedEdge['pointFeature']['u'].insert(1, u)
-
-
-# def segmentParse(c, ParsedEdge):
-#     '''
-#     Parse STEP segment representation
-#
-#     :param ParsedEdge: : parsed edge data object
-#     :param c: estimated surface median point based on extrema points identified
-#     :return
-#     '''
-#
-#     # STEP ISO 10303-42 notes, EXPRESS descriptor
-#     # ENTITY Line
-#     #   SUBTYPE OF (Curve);
-#     #   point : Cartesian_point;
-#     #   line_direction : Direction;
-#
-#     # if ParsedEdge.get('subedgeParams') is not None:
-#     #     edgeParams_ = ParsedEdge['subEdgeParams']
-#     # else:
-#     edgeParams_ = ParsedEdge['edgeParams']
-#
-#     cleanEdgeParams = cleanSubRefs(edgeParams_)
-#     for cet in cleanEdgeParams:
-#         if (STEPobj[ref2index(cet)].type_name == 'CARTESIAN_POINT'):
-#             linePoint = CP2point(cet)
-#             ParsedEdge['linePoint'] = linePoint
-#
-#         if (STEPobj[ref2index(cet)].type_name == 'VECTOR'):
-#             lineVectorDisp = STEPobj[ref2index(cet)].params[-1]
-#             ParsedEdge['lineVectorDisp'] = lineVectorDisp
-#             lineVectorDir = STEPobj[ref2index(cet)].params[-2]
-#             if (STEPobj[ref2index(lineVectorDir)].type_name == 'DIRECTION'):
-#                 lineVectorDir = CP2point(lineVectorDir)
-#                 ParsedEdge['lineVectorDir'] = lineVectorDir
-#
-#     minPoint, minPointCentroidDisp, v1ext, v2ext = pointSegmentMinDisp(c, ParsedEdge['vertex1'],
-#                                                                        ParsedEdge['vertex2'])
-#     # todo, if there are multiple minima, return list? store minpoint as list?
-#
-#     v1 = ParsedEdge['vertex1']
-#     v2 = ParsedEdge['vertex2']  # v1 always equals v2 for full circle
-#
-#     # recalculated every centroid update
-#     ParsedEdge['pointFeature']['xyz'] = [v1, v2]
-#     ParsedEdge['pointFeature']['centroidDisp'] = [np.linalg.norm(centroid - v1).item(),
-#                                                   np.linalg.norm(centroid - v2).item()]
-#     ParsedEdge['pointFeature']['u'] = [0, 1]  # normalise to [0, 1]
-#
-#     if not v1ext and not v2ext:
-#         ParsedEdge['pointFeature']['xyz'].insert(1, minPoint)
-#         ParsedEdge['pointFeature']['centroidDisp'].insert(1, minPointCentroidDisp)
-#         u = np.linalg.norm(minPoint - ParsedEdge['vertex1']) / np.linalg.norm(
-#             ParsedEdge['vertex2'] - ParsedEdge['vertex1'])
-#         ParsedEdge['pointFeature']['u'].insert(1, u)
-#
 
 
 def circleParse(c, ParsedEdge, calcExtrema=False):
@@ -2731,7 +2117,6 @@ def ellipseParse(c, ParsedEdge, calcExtrema=False):
                 ParsedEdge['pointFeature']['xyz'].insert(-1, ex)
                 ParsedEdge['pointFeature']['centroidDisp'].insert(-1, np.linalg.norm(ex - c).item())
                 ParsedEdge['pointFeature']['u'].insert(-1, uArc[ex_i].item())  # check u proximity?
-
 
 
 def boundedCurve(c, complexEntityList, calcExtrema=False):
@@ -3943,8 +3328,8 @@ def toroidSurfaceParse(AFSobj, c, calcExtrema=False):
     # iterativeScaledPrecision = 1e-4  # for testing
 
     if rotSymDisp < eps_STEP_AP21:
-        ParsedEdge['rotSymFeature'] = dict()
-        ParsedEdge['rotSymFeature']['rotSymCentre'] = [axisPoint,]
+        ParsedSurface['rotSymFeature'] = dict()
+        ParsedSurface['rotSymFeature']['rotSymCentre'] = [axisPoint,]
         # ParsedEdge['rotSymFeature']['rotSymRadius'] = radius
         # ParsedSurface['rotSymCentre'] = axisPoint
     else:
@@ -4248,9 +3633,9 @@ def coneSurfaceParse(AFSobj, c, calcExtrema=False):
     # test whether centroid is on the far side of the apex
     if np.linalg.norm(centroid - apexPoint) < np.linalg.norm(centroid - axisPoint):
         if insideOutsideSurfaceTest(c, apexPoint, AFSobj):
-            ParsedEdge['rotSymFeature'] = dict()
-            ParsedEdge['rotSymFeature']['rotSymCentre'] = apexPoint
-            ParsedEdge['rotSymFeature']['rotSymRadius'] = 0
+            ParsedSurface['rotSymFeature'] = dict()
+            ParsedSurface['rotSymFeature']['rotSymCentre'] = apexPoint
+            ParsedSurface['rotSymFeature']['rotSymRadius'] = 0
 
             # ParsedSurface['rotSymCentre'] = apexPoint
             # ParsedSurface['rotSymRadius'] = 0
@@ -4748,6 +4133,502 @@ def surfaceParse(AFSobj, c, calcExtrema=True):
             BSplineSurfaceWithKnotsParse(AFSobj, c, calcExtrema)
 
 
+# ================================================STEP stepcode.Part21 parsing related functions
+def STEPlabelOffset(i, refStrList):
+    '''account for missing text label string in early STEP versions'''
+    if isinstance(refStrList[0], str):
+        if refStrList[0]:
+            if refStrList[0][0] == '#':
+                return i - 1
+            else:
+                return i
+        else:
+            return i
+    else:
+        return i - 1
+
+
+def cleanSubRefs(refStr):
+    '''
+    Flatten parameter sets and extract #d string references from stepcode parser
+    :param refSt:
+    :return list of reference strings
+    '''
+
+    flattenList = (
+        lambda irregularL: [e for i in irregularL for e in flattenList(i)]
+        if type(irregularL) is list
+        else [irregularL]
+    )
+    sp = flattenList(refStr)  # flatten sublists
+    sp = [i for i in sp if isinstance(i, str)]
+    sp = [re.match("#[0-9]+", i) for i in sp]
+    sp = [i.string for i in sp if i is not None]
+    return sp
+
+
+def ref2index(s): return int(s[1:]) - 1
+
+
+def CP2point(pointRefString):
+    '''
+    Return np.array of STEP AP21 CARTESIAN_POINT, DIRECTION, VECTOR
+
+    :param pointRefString: STEP reference string
+    :return np.array of STEP AP21 [CARTESIAN_POINT, DIRECTION, VECTOR]
+    '''
+
+    # assert STEPobject[ref2index(pointRefString)].type_name == "CARTESIAN_POINT"
+    # R3 = STEPobject[ref2index(pointRefString)].params[1]
+    R3 = STEPobj[ref2index(pointRefString)].params[-1]
+    return np.array([R3[0], R3[1], R3[2]])
+
+
+def axis1Placement(strRef):
+    '''
+    Process STEP AXIS1_PLACEMENT entity
+    axis: the direction of the axis.
+
+    :param strRef: STEP reference string
+    :return axisPoint, normDir, refDir
+    '''
+    # STEP ISO 10303-42 notes, EXPRESS descriptor
+    # ENTITY Axis1_placement
+    #   SUBTYPE OF (Axis_placement);
+    #   axis : OPTIONAL Direction;
+
+    # Attribute definitions:
+    # axis: the direction of the axis.
+    # The dimensionality of the Axis_placement_2d shall be 3.
+    # The number of dimension ratios of the axis shall be 3.
+
+    if STEPobj[ref2index(strRef)].type_name != 'AXIS1_PLACEMENT':
+        print("axis2Placement3D assignment failure: " + STEPobj[ref2index(strRef)].type_name)
+        return None
+
+    axisPoint = None
+    normDir = None
+    subRefList = cleanSubRefs(STEPobj[ref2index(strRef)].params)
+
+    if (STEPobj[ref2index(subRefList[0])].type_name == 'CARTESIAN_POINT'):
+        axisPoint = CP2point(subRefList[0])
+
+        if len(subRefList) > 1:
+            if (STEPobj[ref2index(subRefList[1])].type_name == 'DIRECTION'):
+                normDir = CP2point(subRefList[1])
+
+    return axisPoint, normDir
+
+
+def axis2Placement3D(strRef):
+    '''
+    Process STEP AXIS2_PLACEMENT_3D entity
+    axis: the Direction that defines the second axis of the Axis_placement. (Y or V, not normal)
+    ref_direction: the direction used to determine the direction of the local X axis. (or U)
+
+    :param strRef: STEP reference string
+    :return
+    '''
+    # STEP ISO 10303-42 notes, EXPRESS descriptor
+    # process STEP AXIS2_PLACEMENT_3D entity
+    # axis: the Direction that defines the second axis of the Axis_placement. (Y or V, not normal)
+    # The value of this attribute need not be specified.
+    # ref_direction: the direction used to determine the direction of the local X axis. (or U)
+    # The value of this attribute need not be specified.
+    # If axis or ref_direction is omitted, these directions are taken from the geometric coordinate system
+    # If both axis and ref_direction are provided then the vector product of axis and ref_direction shall not be a null vector.
+
+    if STEPobj[ref2index(strRef)].type_name != 'AXIS2_PLACEMENT_3D':
+        print("axis2Placement3D assignment failure: " + STEPobj[ref2index(strRef)].type_name)
+        return None
+
+    axisPoint = None
+    normDir = None
+    refDir = None
+    subRefList = cleanSubRefs(STEPobj[ref2index(strRef)].params)
+
+    if (STEPobj[ref2index(subRefList[0])].type_name == 'CARTESIAN_POINT'):
+        axisPoint = CP2point(subRefList[0])
+
+        if len(subRefList) > 1:
+            if (STEPobj[ref2index(subRefList[1])].type_name == 'DIRECTION'):
+                normDir = CP2point(subRefList[1])
+
+                # relying on order specified
+                # https://www.steptools.com/stds/smrl/data/modules/elemental_geometric_shape/sys/4_info_reqs.htm#elemental_geometric_shape_arm.axis_placement
+                if len(subRefList) > 2:
+                    if (STEPobj[ref2index(subRefList[2])].type_name == 'DIRECTION'):
+                        refDir = CP2point(subRefList[2])
+
+    return axisPoint, normDir, refDir
+
+
+# def axis2Placement3D(strRef):
+#     '''
+#     Process STEP AXIS2_PLACEMENT_3D entity
+#     axis: the Direction that defines the second axis of the Axis_placement. (Y or V, not normal)
+#     ref_direction: the direction used to determine the direction of the local X axis. (or U)
+#
+#     :param strRef: STEP reference string
+#     :return axisPoint, auxDir, refDir
+#     '''
+#     # process STEP AXIS2_PLACEMENT_3D entity
+#     assert STEPobj[ref2index(strRef)].type_name == 'AXIS2_PLACEMENT_3D'
+#     # D = {}
+#
+#     if '#' in STEPobj[ref2index(strRef)].params[0]:  # check for name string
+#         # not a robust approach as certain values are optional
+#         offset = 0
+#     else:
+#         offset = 1
+#
+#     axisPoint = STEPobj[ref2index(strRef)].params[offset]
+#     assert STEPobj[ref2index(axisPoint)].type_name == 'CARTESIAN_POINT'
+#     axisPoint = CP2point(axisPoint)
+#     # D['axisPoint'] = axisPoint
+#
+#     auxDir = STEPobj[ref2index(strRef)].params[offset + 1]
+#     assert STEPobj[ref2index(auxDir)].type_name == 'DIRECTION'
+#     auxDir = CP2point(auxDir)
+#     # D['auxDir'] = auxDir
+#
+#     refDir = STEPobj[ref2index(strRef)].params[offset + 2]
+#     assert STEPobj[ref2index(refDir)].type_name == 'DIRECTION'
+#     refDir = CP2point(refDir)
+#     # D['refDir'] = refDir
+#
+#     return axisPoint, auxDir, refDir
+
+
+# search for cartesian points & check if points correspond with referenced curve/edge vertexes
+
+# TRIMMED_CURVE
+# ENTITY trimmed_curve
+# SUBTYPE OF (bounded_curve);
+# basis_curve : curve;
+# trim_1 : SET[1:2] OF trimming_select;
+# trim_2 : SET[1:2] OF trimming_select;
+# sense_agreement : BOOLEAN;
+# master_representation : trimming_preference;
+
+# provides either parametric, point or angle end points to arc
+# can be used to update vertex1/2
+
+
+# local STEP (AdvancedFaceSurfaces) data assistant functions
+
+
+def insideOutsideSurfaceTest(c, mPoint, AFSobj, verbose=False):
+    '''
+    Project ray from centroid (c) toward mPoint in order to determine whether this ray intersects the surface defined in AFSobj
+    The angle of edge vertices of an intercepted face are calculated with respect to this point and summed
+    Return true if point within surface edges ("Angle Sum Algorithm")
+    No accommodation for holes in surface
+    :param AFSobj: parsed surfaces data object
+    :param c: estimated surface median point based on extrema points identified
+    :param mPoint:
+    :return bool True if within surface
+    '''
+
+
+    def vertexAngle(mPoint, v1, v2):
+        # project vertex points to a plane defined by mPoint and sNorm
+        m_v1 = v1 - mPoint
+        p_v1 = v1 - np.dot(m_v1, sNorm) * sNorm
+
+        m_v2 = v2 - mPoint
+        p_v2 = v2 - np.dot(m_v2, sNorm) * sNorm
+
+        mppv1 = p_v1 - mPoint
+        mppv2 = p_v2 - mPoint
+
+        sign = np.sign(np.cross(mppv1, mppv2).dot(sNorm))
+
+        v1v2cos = np.dot(mppv1, mppv2) / (np.linalg.norm(mppv1) * np.linalg.norm(mppv2))  # cosine
+
+        if (np.abs(v1v2cos) < eps_STEP_AP21) and verbose:
+            print("insideOutsideSurfaceTest(): edge warning")
+
+        # zero value implies mPoint lies on edge
+        return (sign * np.arccos(np.clip(v1v2cos, -1, 1)))
+
+    sNormDen = np.linalg.norm(mPoint - c)
+    if sNormDen > eps_STEP_AP21:
+        sNorm = (mPoint - c) / sNormDen
+    else:
+        # point is at centroid, find normal from provided surface parameters
+        print("insideOutsideSurfaceTest(): median centroid at surface, surface normal substituted")
+        # add offset to everything and try again?
+        # mirror mPoint around surface normal? just use surface normal instead? -> requires earlier calc of axis2Placement3D
+        # _1=1
+        sNorm = AFSobj['ParsedSurface']['normDir']
+
+    edgeTotalAngle = 0
+    vertexLoopCount = 0
+    for edge in AFSobj['outerBoundEdgeLoop']:
+        v1 = edge['vertex1']
+        v2 = edge['vertex2']
+
+        # #if not np.isclose(v1, v2).all():
+        # if edge['vertex1ref'] == edge['vertex2ref']: # loop, discard
+        #     if edge['typeName'] == 'CIRCLE' or edge['typeName'] == 'B_SPLINE_CURVE_WITH_KNOTS' or edge['typeName'] == 'ELLIPSE':
+        #         vertexLoopCount +=1 # should be discarded if point is not within loop?
+
+        # catch spline and convert to polyline vertices
+        if edge['typeName'] == 'B_SPLINE_CURVE_WITH_KNOTS':
+            if edge['vertex1ref'] == edge['vertex2ref']:  # loop, discard
+                vertexLoopCount += 1  # should be discarded if point is not within loop?
+            else:
+                splinePolyline, splinePolylineU = splineToPolyline(edge['BsplineKnotCurve'], curveSampleFactor=1)
+                # find closest point on spline and ensure that this is not mPoint
+
+                # nearestSplinePointU = splineCurveMinMaxPointDisp(edge['BsplineKnotCurve'], mPoint, maxSearch=False)
+
+                # if mPoint[0]==0: # and mPoint[1]== -0.30397087 and mPoint[2]==-16.61759168:
+                #     _1=1
+                nearestSplinePointU = BsplineCurveExtremaDisp(edge['BsplineKnotCurve'],
+                                                              mPoint,
+                                                              maxSearch=False,
+                                                              uv_xyz=True)
+
+                if len(nearestSplinePointU) == 0: # usually means mPoint is closest to endpoints
+                    #
+                    if np.linalg.norm(mPoint - v1) <= np.linalg.norm(mPoint - v2):
+                        nearestSplinePoint = v1
+                        nearestSplinePointU = 0.
+                    else:
+                        nearestSplinePoint = v2
+                        nearestSplinePointU = 1.
+                else:
+                    nearestSplinePoint = np.array(edge['BsplineKnotCurve'].evaluate_list(nearestSplinePointU))
+
+                if np.linalg.norm(mPoint - nearestSplinePoint) < eps_STEP_AP21:
+                    print('insideOutsideSurfaceTest(): spline edge warning - ignore polyline warnings')
+                if not any([np.isclose(nearestSplinePointU, splU) for splU in splinePolylineU]):
+                    # has to be ordered correctly
+                    splinePolylineU = np.insert(splinePolylineU, splinePolylineU.searchsorted(nearestSplinePointU),
+                                                nearestSplinePointU)
+                    iu = np.argmin(np.abs(splinePolylineU - nearestSplinePointU))
+                    splinePolyline = [np.array(spl) for spl in splinePolyline]
+                    splinePolyline = np.insert(splinePolyline, iu, nearestSplinePoint, axis=0)
+                for i in range(len(splinePolyline) - 1):
+                    edgeTotalAngle += vertexAngle(mPoint, splinePolyline[i], splinePolyline[i + 1])
+                # _1=1
+
+        # account for circle or ellipse arcs, find nearest point on arc to mPoint,
+        # add a point there, effectively converting arc into two segments
+        elif (edge['typeName'] == 'CIRCLE'):
+            if edge['vertex1ref'] == edge['vertex2ref']:  # loop, discard
+                vertexLoopCount += 1  # should be discarded if point is not within loop?
+            else:
+                nearArcPoint, _ = pointCircleMinMaxDisp(mPoint,
+                                                        edge['axisPoint'],
+                                                        edge['normDir'],
+                                                        edge['radius'])
+                if pointInArc(nearArcPoint,
+                              v1, v2,
+                              edge['refDir'],
+                              edge['auxDir'],
+                              edge['normDir'],
+                              edge['axisPoint'],
+                              rotSym=False):
+                    edgeTotalAngle += vertexAngle(mPoint, v1, nearArcPoint)
+                    edgeTotalAngle += vertexAngle(mPoint, nearArcPoint, v2)
+                    print("untested circle arc division")
+
+        elif edge['typeName'] == 'ELLIPSE':
+            if edge['vertex1ref'] == edge['vertex2ref']:  # loop, discard
+                vertexLoopCount += 1  # should be discarded if point is not within loop?
+            else:
+                nearArcPoint, _ = pointEllipseMinMaxDisp(mPoint,
+                                                         edge['axisPoint'],
+                                                         edge['refDir'],
+                                                         edge['auxDir'],
+                                                         edge['normDir'],
+                                                         edge['majorRadius'],
+                                                         edge['minorRadius'],
+                                                         interior=False)
+                if pointInArc(nearArcPoint,
+                              v1, v2,
+                              edge['refDir'],
+                              edge['auxDir'],
+                              edge['normDir'],
+                              edge['axisPoint'],
+                              rotSym=False):
+                    edgeTotalAngle += vertexAngle(mPoint, v1, nearArcPoint)
+                    edgeTotalAngle += vertexAngle(mPoint, nearArcPoint, v2)
+                    print("untested ellipse arc division")
+
+        else:
+            # project vertex points to a plane defined by mPoint and sNorm
+            edgeTotalAngle += vertexAngle(mPoint, v1, v2)
+
+    # surfaces that curve > 90deg can give false negative, assume inside/outside test is to detect nearest surface
+
+    # exception for cylinder, conic, sphere
+    if (AFSobj['SurfaceTypeName'] in ['CYLINDRICAL_SURFACE', ]) or (AFSobj['SurfaceTypeName'] in ['CONICAL_SURFACE', ]):
+        # edges angle sum to zero from 2x loops and seam edge ---------------------needs testing
+        if (np.abs(edgeTotalAngle % (2 * np.pi)) < eps_STEP_AP21) and (
+                vertexLoopCount >= 1):  # (len(AFSobj['outerBoundEdgeLoop']) < 4):
+            # only need to determine whether point lies within section of cone axis within cone as circle or ellipse loops at ends signify
+            #   fully enclosed surface
+            # vertex angles that sum to zero will still indicate a crossing, for either CW, or ACW direction configuration
+
+            # if method is uniquely used for closest surface point on a plane encompassing projection and cylinder axis
+            # can then ignore far-side intersection
+
+            # ?? find nearest points on circles/ellipses/bsplines at each curved edge, then test if both points are to one side??
+            curvedEdgeNearestPoint = []
+            normDir = np.array(AFSobj['ParsedSurface']['normDir'])
+            for edge in AFSobj['outerBoundEdgeLoop']:
+                if edge['typeName'] == 'CIRCLE':
+                    nearArcPoint, _ = pointCircleMinMaxDisp(mPoint,
+                                                            edge['axisPoint'],
+                                                            edge['normDir'],
+                                                            edge['radius'])
+                    curvedEdgeNearestPoint.append(np.array(nearArcPoint))
+
+                elif edge['typeName'] == 'ELLIPSE':
+                    nearArcPoint, _ = pointEllipseMinMaxDisp(mPoint,
+                                                             edge['axisPoint'],
+                                                             edge['refDir'],
+                                                             edge['auxDir'],
+                                                             edge['normDir'],
+                                                             edge['majorRadius'],
+                                                             edge['minorRadius'])
+                    curvedEdgeNearestPoint.append(np.array(nearArcPoint))
+
+                elif edge['typeName'] == 'B_SPLINE_CURVE_WITH_KNOTS':
+
+                    # should go to a plane-curve intersection function
+
+                    # define plane through axisPoint, mPoint, normDir
+                    axisPoint = np.array(AFSobj['ParsedSurface']['axisPoint'])
+                    # normDir = np.array(AFSobj['ParsedSurface']['normDir'])
+                    planeNorm = np.cross((mPoint - axisPoint), normDir)
+                    orthoPlane = np.cross(planeNorm, normDir)
+                    mSign = np.dot(axisPoint - mPoint, orthoPlane) > 0
+                    sPolyline, sPolylineU = splineToPolyline(edge['BsplineKnotCurve'], curveSampleFactor=1)
+                    nearArcPointSet = []
+                    U = []
+
+                    for i in range(0, len(sPolyline) - 1):
+                        nearArcPoint = intersectSegmentPlane(np.array(sPolyline[i]),
+                                                             np.array(sPolyline[i + 1]),
+                                                             planeNorm,
+                                                             mPoint)
+                        if nearArcPoint is not None:
+                            nearArcPointSet.append(nearArcPoint)
+                            U.append(i)
+
+                    # determine intersection on mPoint side of plane
+                    # test whether vector from mPoint to intersection is parallel with normDir
+                    if len(nearArcPointSet) == 0:
+                        break
+                    elif len(nearArcPointSet) == 1:
+                        nearArcPoint = nearArcPointSet[0]
+                        iu = U[0]
+                    else:
+                        for i_naps, naps in enumerate(nearArcPointSet):
+                            napsSign = np.dot(axisPoint - naps, orthoPlane) > 0
+                            if napsSign == mSign:
+                                # if np.isclose(np.cross(mPoint - naps, normDir), np.array([0., 0., 0.]), eps_STEP_AP21).all():
+                                nearArcPoint = naps
+                                iu = U[i_naps]
+
+                    # binary search over u-interval
+                    if iu + 1 > len(sPolylineU):
+                        _1 = 1
+                    hiU = sPolylineU[iu + 1]
+                    hiP = sPolyline[iu + 1]
+                    loU = sPolylineU[iu]
+                    loP = sPolyline[iu]
+
+                    while (hiU - loU) > eps_STEP_AP21:  # 1E-10: #==================================================
+                        midU = loU + (hiU - loU) / 2
+                        midP = np.array(edge['BsplineKnotCurve'].evaluate_single(midU))
+                        nearArcPoint = intersectSegmentPlane(loP, midP, planeNorm, mPoint)
+                        if nearArcPoint is not None:
+                            hiP = midP
+                            hiU = midU
+                        else:
+                            nearArcPoint = intersectSegmentPlane(midP, hiP, planeNorm, mPoint)
+                            if nearArcPoint is not None:
+                                loP = midP
+                                loU = midU
+                            else:
+                                print("fail")
+
+                    curvedEdgeNearestPoint.append(np.array(nearArcPoint))
+
+            if len(curvedEdgeNearestPoint) > 2:
+                print("insideOutsideSurfaceTest cylinder/conical fail")
+                print(curvedEdgeNearestPoint)
+                print(mPoint)
+            if len(curvedEdgeNearestPoint) < 2:
+                # print("insideOutsideSurfaceTest cylinder/conical fail")
+                return False
+            # project intersections to plane where axis is normal (normDir), through mPoint
+            # if all points have same sign, all are on same side
+            if not all([np.dot(mPoint - cenp, normDir) > 0 for cenp in curvedEdgeNearestPoint]):
+                return True
+            else:
+                return False
+
+    # if AFSobj['SurfaceTypeName'] in ['CONICAL_SURFACE',]:
+    #     # edges angle sum to zero from 2x loops and seam edge ---------------------needs testing
+    #     if (np.abs(edgeTotalAngle) < eps_STEP_AP21) and (vertexLoopCount == 2): # (len(AFSobj['outerBoundEdgeLoop']) < 4):
+    #         # only need to determine whether point lies within section of cone axis within cone
+    #         return True
+    #     else:
+    #         return False
+
+    if AFSobj['SurfaceTypeName'] in ['PLANE', ]:  # full circle
+        if (np.abs(edgeTotalAngle) < eps_STEP_AP21) and (len(AFSobj['outerBoundEdgeLoop']) < 2):
+            return True
+        elif ((np.abs(edgeTotalAngle) % (2 * np.pi)) < eps_STEP_AP21) and (len(AFSobj['outerBoundEdgeLoop']) > 1):
+            return True
+        else:
+            return False
+
+    # may have to take VOR into account depending on orientation of surface,
+    # e.g. concave or convex spherical surface
+    # assume that minima point is always closest to centroid?
+    # if not edge['VOR']:
+    if not AFSobj['SurfaceNormalOutwards']:
+        if (edgeTotalAngle % (2 * np.pi)) < eps_STEP_AP21 and (edgeTotalAngle > 0):
+            return True
+        else:
+            return False
+    else:
+        if (edgeTotalAngle % (2 * np.pi)) < eps_STEP_AP21 and (edgeTotalAngle < 0):
+            return True
+        else:
+            return False
+
+
+def parseSTEPstr(s):
+    # following operations unique to stepcode.Part21 Parser
+    s = s.replace(";\n", ";;")
+    s = s.replace("\n", "")
+    s = s.replace(";;", ";\n")
+
+    P = Parser()
+    # model = P.parse(/home/foobert/.config/JetBrains/PyCharmCE2023.1/scratches/simple_schema.exp)
+    model = P.parse(s)
+    SO = model.sections[0].entities
+
+    # fixing step files with non-contiguous line and #ref indices
+    if ref2index(SO[-1].ref) is not len(SO):
+        SO.sort(key=lambda x: int(x.ref[1:]))
+        padded_SO = [0] * int(SO[-1].ref[1:])
+        for ss in SO:
+            padded_SO[ref2index(ss.ref)] = ss
+        #SO = padded_SO
+
+    return padded_SO
+
+
 def parseStepcodePart21object():
     # get STEP surface instances and edge loop references to associated edges, parse within AdvancedFaceSurfaces list of features (not applicable to OFF format)
     AFSobj = []
@@ -4796,7 +4677,8 @@ def parseStepcodePart21object():
     return AFSobj
 
 
-def getConvexHullPointSetSTEP():
+def getConvexHullPointSetSTEP(STEPobj):
+    """first trawl of cartesian points and features from STEP object file prior to parsing as AdvancedFaceSurface object"""
     # get convex hull points of model in order to determine a reliable median centroid (not applicable to OFF format)
     # exclude Advanced_brep_shape_representation which contains a [0,0,0] origin point, e.g.
     # 10 = ADVANCED_BREP_SHAPE_REPRESENTATION('',(#11,#15),#113);
@@ -4827,21 +4709,6 @@ def getConvexHullPointSetSTEP():
     return outermostPoints
 
 
-#=========FORMAT stepcode.Part21 objects INTO USEFUL LOCAL DATA STRUCTURES WHERE INTERRELATIONSHIPS ARE RECORDED
-
-
-AdvancedFaceSurfaces = parseStepcodePart21object()
-
-
-# get convex hull points of model in order to determine a reliable median centroid (not applicable to OFF format)
-outermostPoints = getConvexHullPointSetSTEP()
-
-# OFF convex hull points is simply points set
-# outermostPoints = [np.array(c) for c in OFF_entities.points]
-
-centroid = medianPoint(outermostPoints)
-# continue to ignore local maxima at both radial extents and NURB surface maxima?
-
 def calculateEdgeMaxMin(AFSobj):
     # for all elements, surfaces and bounding edges, iterate maxima discovery relative to centroid
     # unique to stepcode.Part21 input
@@ -4857,9 +4724,253 @@ def calculateEdgeMaxMin(AFSobj):
         surfaceParse(afs, centroid, calcExtrema=False)
 
 
-# if not OFF
-calculateEdgeMaxMin(AdvancedFaceSurfaces)
+# ============================================================ OFF parse
 
+def getOFFpointsfaces(OFFdata):
+    #     parsing data from OFF (Object File Format) string, which store 3D model data.
+    #     See `wikipedia <https://en.wikipedia.org/wiki/OFF_(file_format)>`_
+    #     for the file format specification.
+    OFFdata = OFFdata.splitlines()
+
+    if OFFdata[0] != 'OFF':
+        raise ValueError('Data does not include OFF header.')
+
+    # Second row should contain number of points and faces
+    p, f = [int(x) for x in OFFdata[1].split()[:2]]
+
+    # Rows 2 through p should contain points
+    OFF_points = []
+    for r in OFFdata[2:p + 2]:
+        n = r.split()
+        n = np.array([float(n[0]), float(n[1]), float(n[2])])
+        OFF_points.append(n)
+
+    # Rows p+2 through f+p+2 should contain faces
+    OFF_faces = []
+    for r in OFFdata[p + 2:f + p + 2]:
+        n = int(r.split()[0])
+        face = [int(x) for x in r.split()[1:n + 1]]
+        OFF_faces.append(face)
+
+    return OFF_points, OFF_faces
+
+
+def OFFsegmentParse(localCentroid, ParsedEdge):
+
+    v1 = ParsedEdge['vertex1']
+    v2 = ParsedEdge['vertex2']  # v1 always equals v2 for full circle
+
+    minPoint, minPointCentroidDisp, v1ext, v2ext = pointSegmentMinDisp(localCentroid, v1, v2)
+
+    # recalculated every centroid update
+    ParsedEdge['pointFeature']['xyz'] = [v1, v2]
+    ParsedEdge['pointFeature']['centroidDisp'] = [np.linalg.norm(localCentroid - v1).item(),
+                                                  np.linalg.norm(localCentroid - v2).item()]
+    ParsedEdge['pointFeature']['u'] = [0, 1]  # normalise to [0, 1]
+
+    if not v1ext and not v2ext:
+        ParsedEdge['pointFeature']['xyz'].insert(1, minPoint)
+        ParsedEdge['pointFeature']['centroidDisp'].insert(1, minPointCentroidDisp)
+        u = np.linalg.norm(minPoint - ParsedEdge['vertex1']) / np.linalg.norm(
+            ParsedEdge['vertex2'] - ParsedEdge['vertex1'])
+        ParsedEdge['pointFeature']['u'].insert(1, u)
+
+
+
+def parseOFFpointsfaces(OFF_points, OFF_faces):
+    parsedOFFsurfaces = []
+    parsedOFFedges = []
+    offsetRef = len(OFF_points) + len(OFF_faces)
+
+    # OFF convex hull points is simply points set
+    #outermostPoints = [np.array(c) for c in OFF_entities['points']]
+    centroid = medianPoint(OFF_points)
+
+    for offi, offf in enumerate(OFF_faces):
+        SurfaceClass = {
+            'SurfaceNormalOutwards': False,
+            'SurfaceTypeName': 'PLANE',
+            'SurfaceRef': '#'+str(offi + len(OFF_points)), # get index, check OBOE
+            'SurfaceParams': None,
+            'EdgeLoopList': [],
+            'outerBoundEdgeLoop': [],
+            'ParsedSurface': {}
+        }
+
+        vertices = []
+        # assume referenced points are issued in clockwise order (test?)
+        # create edges from listed vertices
+
+        # normals point toward the side from which the vertices appear in counterclockwise order,
+        # vertices are generated in clockwise order
+
+        for vi in range(0, len(offf)):
+
+            parsedEdgeRef = None
+            for vv in parsedOFFedges: # this is an inefficient search method
+                if (vv['vertex1ref'] == '#'+str(offf[vi])) and not (vv['vertex1ref'] == '#'+str(offf[-1])):
+                    if (vv['vertex2ref'] == '#'+str(offf[vi+1])):
+                        parsedEdgeRef = vv['edgeRef']
+                        # need to store offf reference to instance of parsedOFFedges
+                        vertices.append(ParsedEdge['vertex1'])
+
+                if  (vv['vertex2ref'] == '#'+str(offf[-1])):
+                    if (vv['vertex2ref'] == '#'+str(offf[0])):
+                        parsedEdgeRef = vv['edgeRef']
+                        # need to store offf reference to instance of parsedOFFedges
+                        vertices.append(ParsedEdge['vertex1'])
+
+            if parsedEdgeRef is None:
+                if vi == len(offf) - 1:
+                    ParsedEdge = {
+                        'vertex1' : np.array(OFF_points[offf[vi]]),
+                        'vertex1ref' : '#'+str(offf[vi]),
+                        'vertex2' : np.array(OFF_points[offf[0]]),
+                        'vertex2ref' : '#'+str(offf[0]),
+                    }
+                else:
+                    ParsedEdge = {
+                        'vertex1' : np.array(OFF_points[offf[vi]]),
+                        'vertex1ref' : '#'+str(offf[vi]),
+                        'vertex2' : np.array(OFF_points[offf[vi+1]]),
+                        'vertex2ref' : '#'+str(offf[vi+1]),
+                    }
+
+                ParsedEdge['VOR'] = False
+                ParsedEdge['typeName'] = 'LINE'
+                ParsedEdge['edgeRef'] = '#'+str(len(parsedOFFedges) + offsetRef)
+                ParsedEdge['edgeParams'] = ''
+                ParsedEdge['pointFeature'] = {}
+                OFFsegmentParse(centroid, ParsedEdge)
+                parsedOFFedges.append(ParsedEdge)
+                parsedEdgeRef = ParsedEdge['edgeRef']
+
+                #print(ParsedEdge['vertex1'])
+                vertices.append(ParsedEdge['vertex1'])
+
+            SurfaceClass['EdgeLoopList'].append(parsedEdgeRef)
+            SurfaceClass['outerBoundEdgeLoop'].append(ParsedEdge)
+
+            # normals point toward the side from which the vertices appear in counterclockwise order,
+            # vertices are generated in clockwise order
+
+        if len(vertices) < 3:
+            _1=1
+
+
+        axisPoint = vertices[0] # medianPoint(vertices)
+        #normDir = np.cross(vertices[0] - axisPoint, vertices[1] - axisPoint)
+        normDir = np.cross(vertices[2] - vertices[0], vertices[1] - vertices[0])
+        if np.linalg.norm(normDir) ==0.:
+            normDir = np.cross(vertices[2] - vertices[1], vertices[0] - vertices[1])
+            _1=1
+        normDir = normDir / np.linalg.norm(normDir)
+        refDir = vertices[0] - vertices[1]
+        if np.linalg.norm(refDir) ==0.:
+            refDir = vertices[1] - vertices[2]
+            _1=1
+        refDir = refDir/np.linalg.norm(refDir)
+        SurfaceClass['ParsedSurface']['axisPoint'] = axisPoint
+        SurfaceClass['ParsedSurface']['normDir'] = normDir
+        SurfaceClass['ParsedSurface']['refDir'] = refDir
+        SurfaceClass['ParsedSurface']['pointFeature'] = {}
+        SurfaceClass['ParsedSurface']['pointFeature']['xyz'] = []
+        SurfaceClass['ParsedSurface']['pointFeature']['centroidDisp'] = []
+        SurfaceClass['ParsedSurface']['pointFeature']['maxima'] = []
+        SurfaceClass['ParsedSurface']['pointFeature']['minima'] = []
+
+        parsedOFFsurfaces.append(SurfaceClass)
+    return parsedOFFsurfaces
+
+
+
+
+
+
+
+testDir = os.path.normpath(r"/media/foobert/Dell2HDD/STEP_test_files")
+#primitivesDir = os.path.normpath(testDir + r"primitives")
+
+#filepath = "primitives/Cube/unit_cube_inc8.0_blend.06.stp"
+# filepath = "primitives/Cube/Cylinder/unit_cyl.stp"
+# filepath = "primitives/Cube/Primitive_Cone-PartCone.step"
+
+#filepath = testDir + "RR_STEP_test_1A.step" # pass.. I think, no representation available
+#filepath = testDir + "RR_STEP_test_N.step" # fail, no trimmed_curve circle code================
+# filepath = testDir + "00000001_1ffb81a71e5b402e966b9341_step_000.step"
+# filepath = testDir + "00000010_b4b99d35e04b4277931f9a9c_step_000.step"
+#filepath = "LEA-M8F(AP203).STEP" # too large to debug?
+
+#filepath = testDir + "9341_step_000.step" #FAIL - reverse list from spline=======================
+#filepath = testDir + "revolve_spline.step" #PASS
+
+# filepath = testDir + "/simpleSpindle1.step" #PASS
+# filepath = testDir + "Maltese_cruciform.step" #PASS
+#filepath = "TiltedConeAP203.step" # pass
+#filepath = "OffsetCone_AP214_noPlacement_noParametric.step"
+#filepath = "OffsetCone-PartCone.step" #PASS2
+#filepath = "TiltedCylinder4_AP214_PC.step" #PASS2
+#filepath = "TiltedCylinder5-AP214_draft.step" #PASS2
+#filepath = "TiltedCylinder4c-AP203-ESOP.step" #PASS2
+#filepath = "Cylinder5_AP214_PC.step" #PASS2
+#filepath = "DrexelBlendedCylinder_topOvalPlane.step" #PASS2
+#filepath = "DrexelBlendedCylinder_curvedBlend.step" #PASS2
+#filepath = "DrexelBlendedCylinder_midriffTube.step" #PASS2 - note disparity between ellipse minima and vertexes
+
+# can a minima exist on an NURB surface edge? test all local NURB boundary minima against centroid disp??
+
+#filepath = "TiltedCylinder2.step" #PASS2
+#filepath = "TiltedCylinder3.step" #PASS2
+#filepath = "primitives/Cube/unit_cube.stp" # pass2
+#filepath = "Drexel_blended_ellipse_plain.step" # fail, no surfaces ellipse
+#filepath = "Drexel_blended_cylinder.step" # pass2
+#filepath = "DrexelBlendedCylinder_curvedBlend.step" # pass2
+#filepath = "TiltedCylinder.step" # pass2
+#filepath = "Synth_ellipse_plain.step" # pass (no Advanced Face Surface)
+
+#filepath = primitivesDir + os.sep + "Cube/unit_cube.stp" #PASS2
+# OFF format
+#filepath = "bed_0001.off"
+filepath = "testOFF.off"
+filepath = "primitives/Cube/unit_cube.stp"
+
+try:
+    # filepath check
+    checkPath = glob.glob(testDir + os.sep + filepath)
+    if len(checkPath) != 1:
+        raise Exception("pathname failure")
+    else:
+        print("STEPaffineFeatures test: ", filepath)
+        with open(testDir + os.sep + filepath) as f:
+            fileData = f.read()
+except:
+    print("check media is mounted")
+    raise Exception("file failure")
+
+if filepath.split(".",1)[1] in ["step", "stp"]:
+    # FORMAT stepcode.Part21 objects INTO USEFUL LOCAL DATA STRUCTURES WHERE INTERRELATIONSHIPS ARE RECORDED
+    STEPobj = parseSTEPstr(fileData)
+    AdvancedFaceSurfaces = parseStepcodePart21object()
+    # get all points of model for initial median centroid
+    outermostPoints = getConvexHullPointSetSTEP(STEPobj)
+    centroid = medianPoint(outermostPoints)
+    # if not OFF?
+    calculateEdgeMaxMin(AdvancedFaceSurfaces)
+
+elif filepath.split(".",1)[1] in ["OFF", "off"]:
+    OFF_points, OFF_faces = getOFFpointsfaces(fileData)
+    AdvancedFaceSurfaces = parseOFFpointsfaces(OFF_points, OFF_faces)
+    # OFF convex hull points is simply points set
+    outermostPoints = [np.array(c) for c in OFF_points]
+    centroid = medianPoint(outermostPoints)
+
+else:
+    print(" unknown file identifier")
+    exit(-1)
+
+
+centroid = medianPoint(outermostPoints)
+# continue to ignore local maxima at both radial extents and NURB surface maxima?
 
 def centroidIterate(AFSobj, centroid, verbose=False):
     # iteratively calculate max/min points and median centroid point
@@ -4920,17 +5031,32 @@ def parseAdjacentFeatures(AFSobj):  # getNearestFeatures(sourceRef, parsedFaceSe
     # seems there should be sets of associated references with every adjacent feature??
     # only vertex points have associated Ref
 
-    # create structures that only represent adjacent features-
+    # create structures that only represent adjacent features
     # max/min @ vertex: return edges w/ second vertex for all edge set, surfaces that touch vertex
     # max/min @ edge: return vertex1 & 2 plus touching surfaces
     # max/min @ surface: return surface & its edges & vertices
 
+    # get surfaces adjacent to every vertex
+    for afs_index, afs in enumerate(AFSobj):
+        afs['vertexAdjSurfaces'] = {} # too many repeat data structures if list repeated for every edge
+        for se_index, se in enumerate(afs['outerBoundEdgeLoop']):
+            for sRef in ['vertex1ref', 'vertex2ref']:
+                if (se[sRef] not in afs['vertexAdjSurfaces'].keys()):
+                    afs['vertexAdjSurfaces'][se[sRef]] = []
+                    for afs2_index, afs2 in enumerate(AFSobj):
+                        for te_index, te in enumerate(afs2['outerBoundEdgeLoop']):
+                            te_strings = [et for et in te.values() if type(et) == str]
+                            if se[sRef] in te_strings:
+                                if afs2_index not in afs['vertexAdjSurfaces'][se[sRef]]:
+                                    afs['vertexAdjSurfaces'][se[sRef]].append(afs2_index)
+
+
+    # get edges adjacent to every vertex
     for afs_index, afs in enumerate(AFSobj):
         for se_index, se in enumerate(afs['outerBoundEdgeLoop']):
             for sRef in ['vertex1ref', 'vertex2ref']:
                 if se.get(sRef):
                     ref1 = se[sRef]
-                    # indexDictName = sRef + '_' + ref1 + '_featuresIndex'
                     indexDictName = sRef + '_surroundIndex'
                     se[indexDictName] = {}
                     # se[indexDictName][ref1] = (afs_index, se_index)================================================================
@@ -4945,6 +5071,18 @@ def parseAdjacentFeatures(AFSobj):  # getNearestFeatures(sourceRef, parsedFaceSe
                                         ref2 = te[tRef]
                                         if (ref2 != ref1):  # and ref2 not in edgeSource[indexDictName].keys():
                                             se[indexDictName][ref2] = (afs2_index, te_index)
+
+    # get adjacent surfaces to edge
+    for afs_index, afs in enumerate(AFSobj):
+        for se_index, se in enumerate(afs['outerBoundEdgeLoop']):
+            if se.get('edgeRef'):
+                se['edge_surroundIndex'] = {se['edgeRef']:[]}
+                for afs2_index, afs2 in enumerate(AFSobj):
+                    for te_index, te in enumerate(afs2['outerBoundEdgeLoop']):
+                        te_strings = [et for et in te.values() if type(et) == str]
+                        if se['edgeRef'] in te_strings:  #
+                            if te.get('edgeRef'):
+                                se['edge_surroundIndex'][se['edgeRef']].append(afs2_index)
 
 
     # instead of all purpose function, need to find sets of edges at a common vertex
@@ -5157,6 +5295,8 @@ def getPointFeatures(AFSobj):
         pointFeatures['centroidDisp'] = []
         pointFeatures['maxima'] = []
         pointFeatures['minima'] = []
+        pointFeatures['featureRef'] = []
+        pointFeatures['vertexRef'] = []
 
         vertexX = ['vertex1', 'vertex2']
         vertexXref = ['vertex1ref', 'vertex2ref']
@@ -5164,7 +5304,7 @@ def getPointFeatures(AFSobj):
 
         extrema = dict()
         for v in range(0, 2):  # vertex1, vertex2
-            for afs_index, afs in enumerate(AFSobj): #----------------------------------afs_index unused?
+            for afs_index, afs in enumerate(AFSobj):
                 for edge in afs['outerBoundEdgeLoop']:
                     if (edge.get('superTypeNameFlag') is not None):
                         if edge['superTypeName'] == 'SEAM_CURVE':  # exclude SEAM_CURVE data
@@ -5191,6 +5331,7 @@ def getPointFeatures(AFSobj):
                         pfSurround = []
                         adjacentEdgeRefs = []
                         reversedOrder = []
+
                         for vseRef in edge[vertexXref_surroundIndex[v]].keys():
                             adjacentEdgeRefs.append(vseRef)
                             vse = edge[vertexXref_surroundIndex[v]][vseRef]
@@ -5213,13 +5354,14 @@ def getPointFeatures(AFSobj):
 
                         # test vertexX with immediate neighbours
                         if extremaType == 'maxima':
-                            if all([pfs['centroidDisp'][0] > pfs['centroidDisp'][1] + eps_STEP_AP21 for pfs in
-                                    pfSurround]):
+                            if all([pfs['centroidDisp'][0] > pfs['centroidDisp'][1] + eps_STEP_AP21 for pfs in pfSurround]):
                                 if not array3x1match(edge[vertexX[v]], pointFeatures['xyz']):
                                     pointFeatures['xyz'].append(edge[vertexX[v]].tolist())
                                     pointFeatures['centroidDisp'].append(pfSurround[0]['centroidDisp'][0])
                                     pointFeatures['maxima'].append(True)
                                     pointFeatures['minima'].append(False)
+                                    pointFeatures['featureRef'].append(edge[vertexX[v]+'ref_surroundIndex'])
+                                    pointFeatures['vertexRef'].append(edge['vertex1ref'])
 
                         elif extremaType == 'minima':
                             if all([pfs['centroidDisp'][0] < pfs['centroidDisp'][1] - eps_STEP_AP21 for pfs in
@@ -5229,7 +5371,10 @@ def getPointFeatures(AFSobj):
                                     pointFeatures['centroidDisp'].append(pfSurround[0]['centroidDisp'][0])
                                     pointFeatures['maxima'].append(False)
                                     pointFeatures['minima'].append(True)
+                                    pointFeatures['featureRef'].append(edge[vertexX[v]+'ref_surroundIndex'])
+                                    pointFeatures['vertexRef'].append(edge['vertex1ref'])
 
+                        # search through intermediate extrema between vertices
                         maxPFlen = max([len(pfs['u']) for pfs in pfSurround]) - 1
                         if maxPFlen > 1:
                             crawlindex = 1
@@ -5243,7 +5388,7 @@ def getPointFeatures(AFSobj):
                                         pfcd2 = pfs['centroidDisp'][crawlindex + 1]
 
                                         if reversedOrder[pfsIndex]:
-                                            u = len(pfs['u']) - crawlindex - 1  # CHECK
+                                            u = len(pfs['u']) - crawlindex - 1
                                         else:
                                             u = crawlindex
 
@@ -5254,6 +5399,10 @@ def getPointFeatures(AFSobj):
                                                     pointFeatures['centroidDisp'].append(pfcd1)
                                                     pointFeatures['maxima'].append(True)
                                                     pointFeatures['minima'].append(False)
+                                                    pointFeatures['featureRef'].append(edge['edge_surroundIndex'])
+                                                    # if (pfs['u'][u] > (1 - eps_STEP_AP21))
+                                                    #     pointFeatures['ref'].append(edge['vertex1ref'])
+                                                    pointFeatures['vertexRef'].append(None)
 
                                         elif extremaType == 'minima':  # local min
                                             if (pfcd1 < pfcd0 - eps_STEP_AP21) and (pfcd1 < pfcd2 - eps_STEP_AP21):
@@ -5262,30 +5411,139 @@ def getPointFeatures(AFSobj):
                                                     pointFeatures['centroidDisp'].append(pfcd1)
                                                     pointFeatures['maxima'].append(False)
                                                     pointFeatures['minima'].append(True)
+                                                    pointFeatures['featureRef'].append(edge['edge_surroundIndex'])
+                                                    pointFeatures['vertexRef'].append(None)
 
                                 crawlindex += 1
+
+                # print(AFSobj[afs_index]['SurfaceTypeName'])
+                # print(AFSobj[afs_index]['SurfaceRef'])
+
         return pointFeatures
+
+    # def vectorAngle(A, B, C):
+    #     """angle between two points A & B relative to a third C"""
+    #     CA = A - C
+    #     CB = B - C
+    #     return np.atan2(np.linalg.norm(np.cross(CA, CB)), np.dot(CA, CB)) / np.pi
 
     maxPointFeatures = vertexExtremaSearch(AFSobj, extremaType='maxima')
     minPointFeatures = vertexExtremaSearch(AFSobj, extremaType='minima')
 
-    # surfacePointFeature = maxPointFeatures | minPointFeatures # > Python 3.9, requires explicit merge function prior to 3.4
-    surfacePointFeature = {**maxPointFeatures, **minPointFeatures}
-
-    # should add surface point instances to min/maxPointFeatures here?
+    # surfaceEdgeFeature = maxPointFeatures | minPointFeatures # > Python 3.9, requires explicit merge function prior to 3.4
+    # surfaceEdgeFeature = {**maxPointFeatures, **minPointFeatures}
 
     # collate maxima minima extrema within all surfaces, note that local max/min implies that no global hierarchy is required
-    surfacePointFeature = dict()  # todo: this should become an initiated class
-    surfacePointFeature['xyz'] = []
-    surfacePointFeature['centroidDisp'] = []
-    surfacePointFeature['maxima'] = []
-    surfacePointFeature['minima'] = []
+    surfaceEdgeFeature =  {'xyz':[], 'centroidDisp':[], 'maxima':[], 'minima':[], 'featureRef':[], 'vertexRef':[], 'adjRef':[]}
 
     for mpf in [maxPointFeatures, minPointFeatures]:
-        surfacePointFeature['xyz'] = surfacePointFeature['xyz'] + mpf['xyz']
-        surfacePointFeature['centroidDisp'] = surfacePointFeature['centroidDisp'] + mpf['centroidDisp']
-        surfacePointFeature['maxima'] = surfacePointFeature['maxima'] + mpf['maxima']
-        surfacePointFeature['minima'] = surfacePointFeature['minima'] + mpf['minima']
+        surfaceEdgeFeature['xyz'] = surfaceEdgeFeature['xyz'] + mpf['xyz']
+        surfaceEdgeFeature['centroidDisp'] = surfaceEdgeFeature['centroidDisp'] + mpf['centroidDisp']
+        surfaceEdgeFeature['maxima'] = surfaceEdgeFeature['maxima'] + mpf['maxima']
+        surfaceEdgeFeature['minima'] = surfaceEdgeFeature['minima'] + mpf['minima']
+        surfaceEdgeFeature['featureRef'] = surfaceEdgeFeature['featureRef'] + mpf['featureRef']
+        surfaceEdgeFeature['vertexRef'] = surfaceEdgeFeature['vertexRef'] + mpf['vertexRef']
+
+    adjSurfaceSet = []
+    # convert adjoining edge refs at vertex points to adjoining surfaces
+    for spf_ind, spf in enumerate(surfaceEdgeFeature['featureRef']):
+        if len(spf.keys()) > 1: # case of vertex
+            for afs in AFSobj:
+                if surfaceEdgeFeature['vertexRef'][spf_ind] in afs['vertexAdjSurfaces'].keys():
+                    adjSurfaceSet.append({surfaceEdgeFeature['vertexRef'][spf_ind]: afs['vertexAdjSurfaces'][surfaceEdgeFeature['vertexRef'][spf_ind]]})
+                    break
+        else: # edge point extrema not vertex point extrema
+            adjSurfaceSet.append(spf)
+
+    surfaceEdgeFeature['adjRef'] = adjSurfaceSet
+
+    # for each extrema point on an edge or vertex, compare against the relevant adjoining surfaces
+    surfaceFeature = {'xyz':[], 'centroidDisp':[], 'maxima':[], 'minima':[], 'featureRef':[]} # , 'featureRef' needed?
+
+    # same logic used as determining rotationally summetric feature min/max/seam
+    # every (STEP defined, part-of-surface, non-Klein bottle, self-intersecting etc) edge is only connected to two surfaces
+    # does not necessarily hold for NURBS surfaces with multiple minima/maxima/saddle-points
+
+    # for every edge and 2 adjoining surfaces, displacement of minima from centroid are tested to determine local minima
+
+    singleExtremaSurface = [
+        'SPHERICAL_SURFACE',
+        'TOROIDAL_SURFACE',
+        'CYLINDRICAL_SURFACE',
+        'CONICAL_SURFACE',
+        'PLANE',
+        #'B_SPLINE_SURFACE_WITH_KNOTS',
+        'SURFACE_OF_REVOLUTION',
+        'BOUNDED_SURFACE']
+
+    # todo logic for NURBS
+    for spf_index, spf_adj in enumerate(surfaceEdgeFeature['adjRef']):
+
+        surfSet = list(spf_adj.values())[0]
+        featureRef = list(spf_adj.keys())[0]
+        # test all surfaces are single minima/maxima types
+        if all([AFSobj[adjSurf]['SurfaceTypeName'] in singleExtremaSurface for adjSurf in surfSet]):
+
+            if surfaceEdgeFeature['maxima'][spf_index]:
+                if all([AFSobj[adjSurf]['ParsedSurface']['pointFeature']['maxima'][0] for adjSurf in surfSet]) :
+
+                    surroundDisps = [AFSobj[adjSurf]['ParsedSurface']['pointFeature']['centroidDisp'] for adjSurf in surfSet]
+                    featureDisp = surfaceEdgeFeature['centroidDisp'][spf_index]
+
+                    if all([featureDisp >= (sd + eps_STEP_AP21) for sd in surroundDisps]) and (featureRef not in surfaceFeature['featureRef']):
+                        # assign featureDisp local maxima
+                        surfaceFeature['xyz'].append(surfaceEdgeFeature['xyz'][spf_index])
+                        surfaceFeature['centroidDisp'].append(surfaceEdgeFeature['centroidDisp'][spf_index])
+                        surfaceFeature['maxima'].append(True)
+                        surfaceFeature['minima'].append(False)
+                        surfaceFeature['featureRef'].append(featureRef)
+
+                    for sds_index, sds in enumerate(surroundDisps):
+                        if all([(sds - eps_STEP_AP21) >= sd for sd in surroundDisps]) and \
+                                (AFSobj[surfSet[sds_index]]['SurfaceRef'] not in surfaceFeature['featureRef']):
+                            surfaceFeature['xyz'].append(AFSobj[surfSet[sds_index]]['ParsedSurface']['pointFeature']['xyz'][0].tolist())
+                            surfaceFeature['centroidDisp'].append(AFSobj[surfSet[sds_index]]['ParsedSurface']['pointFeature']['centroidDisp'][0])
+                            surfaceFeature['maxima'].append(True)
+                            surfaceFeature['minima'].append(False)
+                            surfaceFeature['featureRef'].append(AFSobj[surfSet[sds_index]]['SurfaceRef'])
+
+                elif (featureRef not in surfaceFeature['featureRef']): # feature is maxima unique
+                    surfaceFeature['xyz'].append(surfaceEdgeFeature['xyz'][spf_index])
+                    surfaceFeature['centroidDisp'].append(surfaceEdgeFeature['centroidDisp'][spf_index])
+                    surfaceFeature['maxima'].append(True)
+                    surfaceFeature['minima'].append(False)
+                    surfaceFeature['featureRef'].append(featureRef)
+
+            # minima features
+            if surfaceEdgeFeature['minima'][spf_index]:
+                if all([AFSobj[adjSurf]['ParsedSurface']['pointFeature']['minima'][0] for adjSurf in surfSet]):
+
+                    surroundDisps = [AFSobj[adjSurf]['ParsedSurface']['pointFeature']['centroidDisp'][0] for adjSurf in surfSet]
+                    featureDisp = surfaceEdgeFeature['centroidDisp'][spf_index]
+
+                    if all([featureDisp <= (sd - eps_STEP_AP21) for sd in surroundDisps]) and (featureRef not in surfaceFeature['featureRef']):
+                        # assign featureDisp local maxima
+                        surfaceFeature['xyz'].append(surfaceEdgeFeature['xyz'][spf_index])
+                        surfaceFeature['centroidDisp'].append(surfaceEdgeFeature['centroidDisp'][spf_index])
+                        surfaceFeature['maxima'].append(False)
+                        surfaceFeature['minima'].append(True)
+                        surfaceFeature['featureRef'].append(featureRef)
+
+                    for sds_index, sds in enumerate(surroundDisps):
+                        if all([(sds - eps_STEP_AP21) <= sd for sd in surroundDisps]) and \
+                                (AFSobj[surfSet[sds_index]]['SurfaceRef'] not in surfaceFeature['featureRef']):
+                            surfaceFeature['xyz'].append(AFSobj[surfSet[sds_index]]['ParsedSurface']['pointFeature']['xyz'][0].tolist())
+                            surfaceFeature['centroidDisp'].append(AFSobj[surfSet[sds_index]]['ParsedSurface']['pointFeature']['centroidDisp'][0])
+                            surfaceFeature['maxima'].append(False)
+                            surfaceFeature['minima'].append(True)
+                            surfaceFeature['featureRef'].append(AFSobj[surfSet[sds_index]]['SurfaceRef'])
+
+                elif (featureRef not in surfaceFeature['featureRef']):
+                    surfaceFeature['xyz'].append(surfaceEdgeFeature['xyz'][spf_index])
+                    surfaceFeature['centroidDisp'].append(surfaceEdgeFeature['centroidDisp'][spf_index])
+                    surfaceFeature['maxima'].append(False)
+                    surfaceFeature['minima'].append(True)
+                    surfaceFeature['featureRef'].append(featureRef)
 
     surfaceSphericalFeature = dict()
     surfaceSphericalFeature['rotSymCentre'] = []
@@ -5294,21 +5552,21 @@ def getPointFeatures(AFSobj):
     for afs in AFSobj:
         if (afs.get('ParsedSurface') is not None):
             # ['ParsedSurface']['pointFeature'] only covers internal features
-            for index_xyz, xyz in enumerate(afs['ParsedSurface']['pointFeature']['xyz']):
-                if not array3x1match(xyz, surfacePointFeature['xyz']):
-                    surfacePointFeature['xyz'].append(xyz)
-                    surfacePointFeature['centroidDisp'].append(
-                        afs['ParsedSurface']['pointFeature']['centroidDisp'][index_xyz])
-                    surfacePointFeature['maxima'].append(afs['ParsedSurface']['pointFeature']['maxima'][index_xyz])
-                    surfacePointFeature['minima'].append(afs['ParsedSurface']['pointFeature']['minima'][index_xyz])
+            # for index_xyz, xyz in enumerate(afs['ParsedSurface']['pointFeature']['xyz']):
+            #     if not array3x1match(xyz, surfaceEdgeFeature['xyz']):
+            #         surfaceEdgeFeature['xyz'].append(xyz)
+            #         surfaceEdgeFeature['centroidDisp'].append(
+            #             afs['ParsedSurface']['pointFeature']['centroidDisp'][index_xyz])
+            #         surfaceEdgeFeature['maxima'].append(afs['ParsedSurface']['pointFeature']['maxima'][index_xyz])
+            #         surfaceEdgeFeature['minima'].append(afs['ParsedSurface']['pointFeature']['minima'][index_xyz])
 
                 # for OBE in afs['outerBoundEdgeLoop']:
                 #     for index_OBExyz, OBExyz in enumerate(OBE['pointFeature']['xyz']):
-                #         if not array3x1match(OBExyz, surfacePointFeature['xyz']):
-                #             surfacePointFeature['xyz'].append(OBExyz)
-                #             surfacePointFeature['centroidDisp'].append(OBE['pointFeature']['centroidDisp'][index_OBExyz])
-                #             surfacePointFeature['maxima'].append(OBE['pointFeature']['maxima'][index_OBExyz])
-                #             surfacePointFeature['minima'].append(OBE['pointFeature']['minima'][index_OBExyz])
+                #         if not array3x1match(OBExyz, surfaceEdgeFeature['xyz']):
+                #             surfaceEdgeFeature['xyz'].append(OBExyz)
+                #             surfaceEdgeFeature['centroidDisp'].append(OBE['pointFeature']['centroidDisp'][index_OBExyz])
+                #             surfaceEdgeFeature['maxima'].append(OBE['pointFeature']['maxima'][index_OBExyz])
+                #             surfaceEdgeFeature['minima'].append(OBE['pointFeature']['minima'][index_OBExyz])
 
             if afs['SurfaceTypeName'] == 'SPHERICAL_SURFACE':
                 if afs['ParsedSurface']['sphereFeatureFlag']:
@@ -5317,7 +5575,7 @@ def getPointFeatures(AFSobj):
                     surfaceSphericalFeature['rotSymRadius'] = afs['ParsedSurface']['pointFeature']['rotSymFeature'][
                         'rotSymRadius']
 
-    return surfacePointFeature, surfaceSphericalFeature
+    return surfaceFeature, surfaceSphericalFeature
 
 
 def translateShapeMatchFormat():
@@ -5341,11 +5599,9 @@ def translateShapeMatchFormat():
 
     for spf_i, spf in enumerate(surfacePointFeature['xyz']):
         if surfacePointFeature['maxima'][spf_i]:
-            if not array3x1match(spf, shapeMatchFormat['featureMaxPoints'], eps_STEP_AP21):
-                shapeMatchFormat['featureMaxPoints'].append(spf)
+            shapeMatchFormat['featureMaxPoints'].append(spf)
         if surfacePointFeature['minima'][spf_i]:
-            if not array3x1match(spf, shapeMatchFormat['featureMinPoints'], eps_STEP_AP21):
-                shapeMatchFormat['featureMinPoints'].append(spf)
+            shapeMatchFormat['featureMinPoints'].append(spf)
 
     shapeMatchFormat['featureSphereDisps'] = []
     shapeMatchFormat['spherePoints'] = []
