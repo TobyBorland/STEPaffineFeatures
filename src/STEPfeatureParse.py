@@ -285,6 +285,7 @@ def splineToPolyline(c, curveSampleFactor=2):
     return (pts, kvs)
 
 
+
 def rationalSurfaceExtremaParam_5(S, p,
                                   maxSearch=True,
                                   localExtrema=False,
@@ -371,7 +372,7 @@ def rationalSurfaceExtremaParam_5(S, p,
     #     S.evaluate()
 
     def neighbouringUV(U, V, isClosedU, isClosedV):
-
+        # this is where edges are discarded
         for u in range(0, U - 2 + (2 * isClosedU)):
             for v in range(0, V - 2 + (2 * isClosedV)):
 
@@ -415,117 +416,6 @@ def rationalSurfaceExtremaParam_5(S, p,
                 #     _1=1
 
                 yield ([NW, N, NE, W, C, E, SW, S, SE], (u, v))
-
-    # def _neighbouringUV(U, V, isClosedU, isClosedV):
-    #     # generator function to yield neighbouring indices over a matrix of size U x V
-    #
-    #     openU = not isClosedU
-    #     openV = not isClosedV
-    #
-    #     for u in range(openU, U - openU):
-    #         for v in range(openV, V - openV):
-    #
-    #             if v == 0:  # closed in v direction
-    #                 if u == U - 1:
-    #                     NW = V - 1
-    #                 else:
-    #                     NW = ((u + 2) * V) + v - 1
-    #
-    #                 W = (V * (u + 1)) - 1
-    #
-    #                 if u == 0:
-    #                     SW = (U * V) - 1  # V - 1
-    #                 else:
-    #                     SW = (u * V) - 1
-    #
-    #                 if u == U - 1:  # closed in u direction
-    #                     N = v
-    #                 else:
-    #                     N = V * (u + 1)
-    #
-    #                 C = u * V
-    #
-    #                 if u == 0:
-    #                     S = V * (U - 1)
-    #                 else:
-    #                     S = V * (u - 1)
-    #
-    #             if v == 1:
-    #                 if u == U - 1:  # closed in u direction
-    #                     NW = v - 1
-    #                 else:
-    #                     NW = ((u + 1) * V) + v - 1
-    #
-    #                 W = (u * V) + v - 1
-    #
-    #                 if u == 0:
-    #                     SW = ((U - 1) * V) + v - 1
-    #                 else:
-    #                     SW = ((u - 1) * V) + v - 1
-    #
-    #                 if u == U - 1:  # closed in v direction
-    #                     N = v
-    #                 else:
-    #                     N = ((u + 1) * V) + v
-    #
-    #                 C = (u * V) + v
-    #
-    #                 if u == 0:
-    #                     S = ((U - 1) * V) + 1
-    #                 else:
-    #                     S = ((u - 1) * V) + v
-    #
-    #             if v > 1:
-    #                 NW = N
-    #                 W = C  # central instance
-    #                 SW = S
-    #
-    #                 N = NE
-    #                 C = E
-    #                 S = SE
-    #
-    #             if v == V - 1:  # closed in v direction
-    #                 if u < U - 1:
-    #                     NE = (u + 1) * V
-    #                 elif u == U - 1:  # closed in u direction
-    #                     NE = 0
-    #
-    #                 if u < U - 1:
-    #                     E = u * V
-    #                 elif u == U - 1:
-    #                     E = ((u - 1) * V) + v + 1
-    #
-    #                 if u == 0:
-    #                     SE = ((U - 1) * V)
-    #                 elif u < U - 1:
-    #                     SE = (u - 1) * V
-    #                 elif u == U - 1:
-    #                     SE = ((u - 2) * V) + v + 1
-    #
-    #             elif v < V - 1:
-    #                 if u < U - 1:  # only have to calculate this once per loop
-    #                     NE = ((u + 1) * V) + v + 1
-    #                 elif u == U - 1:  # closed in u direction
-    #                     NE = v + 1
-    #
-    #                 if u < U - 1:  # only have to calculate this once per loop
-    #                     E = (u * V) + v + 1
-    #                 elif u == U - 1:
-    #                     E = (u * V) + v + 1
-    #
-    #                 if u == 0:
-    #                     SE = ((U - 1) * V) + v + 1
-    #                 elif u < U - 1:  # only have to calculate this once per loop
-    #                     SE = ((u - 1) * V) + v + 1
-    #                 elif u == U - 1:
-    #                     SE = ((u - 1) * V) + v + 1
-    #
-    #             # print([NW, N, NE])
-    #             # print([W, C, E])
-    #             # print([SW, S, SE])
-    #             # print("==========")
-    #
-    #             yield ([NW, N, NE, W, C, E, SW, S, SE], (u, v))
 
     def localNeighbourSearch(S):
         extremaUV = []
@@ -681,8 +571,8 @@ def rationalSurfaceExtremaParam_5(S, p,
 
     def localCurvatureExtrema(discreteK):
         leu = []
-        # localExtremaP = []
-        # maxBound = []
+        localExtremaP = []
+        maxBound = []
 
         for CC, uv in neighbouringUV(len(S.knotvector_u) * deltaFactor,
                                      len(S.knotvector_v) * deltaFactor,
@@ -699,27 +589,46 @@ def rationalSurfaceExtremaParam_5(S, p,
                         # (discreteK[ssn]<0) for ssn in surroundNodes) and
                         # (discreteK[S.sample_size_u * u + v] > 0):
 
-                        pC = np.array(S.evaluate_single(uv))
-                        localExtremaP(pC)
+                        pC = np.array(S.evaluate_single(((uv[0] * S.delta_u) % 1.0, (uv[1] * S.delta_v) % 1.0)))
+                        localExtremaP.append(pC)
+                        surroundNodes = [((int(ssn / S.sample_size_u) * S.delta_u) % 1.0,
+                                          (ssn % S.sample_size_u * S.delta_v) % 1.0) for ssn in surroundNodes]
                         maxBound.append(
                             max([np.linalg.norm(pC - np.array(S.evaluate_single(uvk))) for uvk in surroundNodes]))
+
                         leu.append(uv)
                 else:
                     if all((np.abs(discreteK[ssn]) >= discreteK[(S.sample_size_u * uv[0]) + uv[1]]) for ssn in
                            surroundNodes) and (discreteK[(S.sample_size_u * uv[0]) + uv[1]] < 0):
-                        pC = np.array(S.evaluate_single(uv))
-                        localExtremaP(pC)
+
+                        pC = np.array(S.evaluate_single(((uv[0] * S.delta_u) % 1.0,
+                                                         (uv[1] * S.delta_v) % 1.0)))
+                        localExtremaP.append(pC)
+
+                        # convert surroundNodes to respective [u,v] values
+                        surroundNodes = [((int(ssn / S.sample_size_u) * S.delta_u) % 1.0,
+                                          (ssn % S.sample_size_v * S.delta_v) % 1.0) for ssn in surroundNodes]
+
+                        # for sn in surroundNodes:
+                        #     if (sn[0]>1.0) or (sn[0]<0.0) or (sn[1]>1.0) or (sn[1]<0.0):
+                        #         _1=1
+
                         maxBound.append(
                             max([np.linalg.norm(pC - np.array(S.evaluate_single(uvk))) for uvk in surroundNodes]))
+
                         leu.append(uv)
 
-        return leu
+        return leu, localExtremaP, maxBound
 
     def subSearchUV(mpU, mpV, tol):
         # create simple subdivisions around a minimum point as simple hillclimb search
         tolFlag = 0
         divU = S.delta_u
         divV = S.delta_v
+
+        # if (mpU>1.0) or (mpU<0.0) or (mpV>1.0) or (mpV<0.0):
+        #     _1=1
+
         dpuvlocal = np.linalg.norm(p - np.array(S.evaluate_single((mpU, mpV,))))
         # dpuvlocal = np.inner(p - np.array(S.evaluate_single((mpU, mpV,))))
 
@@ -922,13 +831,14 @@ def rationalSurfaceExtremaParam_5(S, p,
 
         if not np.inf in mUV:
             # find a maximum deviation to indicate when N-R fails
-            if np.linalg.norm(lp - np.array(S.evaluate_single(mUV))) <= mb:
+            if np.linalg.norm(lp - np.array(S.evaluate_single((((mUV[0] * S.delta_u) % 1.0, (mUV[1] * S.delta_v) % 1.0))))) <= mb:
                 extremaUV.append(mUV)
             else:
                 mUV = (np.inf, np.inf)
         if np.inf in mUV:
             # Newton-Raphson fail, try hillclimb
-            mUV = subSearchUV(luv[0], luv[1], eps_bspline)
+            mUV = subSearchUV((luv[0] * S.delta_u) % 1.0, (luv[1] * S.delta_v) % 1.0, eps_bspline)
+
             extremaUV.append(mUV)
         # print(S.evalpts[(S.sample_size_u * luv[0]) + luv[1]])
 
@@ -965,6 +875,688 @@ def rationalSurfaceExtremaParam_5(S, p,
                     return [extremaUnique[dispsExtrema.index(min(dispsExtrema))], ]
                 else:
                     return [np.array(extremaUniquePoint[dispsExtrema.index(min(dispsExtrema))]), ]
+
+
+# def rationalSurfaceExtremaParam_5(S, p,
+#                                   maxSearch=True,
+#                                   localExtrema=False,
+#                                   curvatureTest=False,
+#                                   uv_xyz=True,
+#                                   eps1=0.0001,
+#                                   eps2=0.0005,
+#                                   deltaFactor=4,
+#                                   eps_bspline=1E-10):
+#     '''
+#     Use either Newton-Raphson, or a hillclimbing neighbour search to find minimal or maximal distance on a surface, S, from a supplied point, p
+#     - not tested with surfaces closed along U & V
+#     maxSearch: search for most distant point from p if true, else nearest if false
+#     localExtrema: find any local extrema which differs from surrounding sample points, tolerance not sufficiently defined
+#     curvatureTest: rather than displacement of sampled points to provide seed locations for N-R/hillclimb search,
+#     use a combination of the centres of curvature at any point across U-axis and V-axis to identify C2 inflection point.
+#     uv_xyz: return u,v normalised values or cartesian x,y,z values
+#     eps1: point coincidence limit, halt N-R on reaching this minima
+#     eps2: cosine angle limit, halt N-R on reaching this minima
+#     delta: sample interval dividing surface into points
+#     '''
+#
+#     # easy to find a minimum, but a maximum found through the original hillclimbing algorithm will settle on local maxima
+#     # for surfaces, minimize the following:
+#     #
+#     # f = Su(u,v) * r = 0
+#     # g = Sv(u,v) * r = 0
+#     #
+#     #   where r = S(u,v) - P
+#     #
+#     # Requires Newton-Raphson iteration, objective function is vector valued
+#     #
+#     #     J d = k
+#     #
+#     #     d =   [ u* - u, v* - v ] (alternatively u[i+1] -  u[i], v[i+1]- v[i])
+#     #     k = - [ f(u,v), g(u,v) ]
+#     #     J =     |Su|^2   +  Suu * r       Su*Sv  +  Suv * r
+#     #              Su*Sv   +  Svu * r      |Sv|^2  +  Svv * r
+#     #
+#     # halting conditions:
+#     # point coincidence
+#     #
+#     #         |S(u,v) - p| < e1
+#     #
+#     # cosine
+#     #
+#     #    |Su(u,v)*(S(u,v) - P)|
+#     #    ----------------------  < e2
+#     #    |Su(u,v)| |S(u,v) - P|
+#     #
+#     #    |Sv(u,v)*(S(u,v) - P)|
+#     #    ----------------------  < e2
+#     #    |Sv(u,v)| |S(u,v) - P|
+#     #
+#     # 1) first check 2 & 3
+#     # 2) if at least one of these is not, compute new value, otherwise halt
+#     # 3) ensure the parameter stays within range
+#     #     * if not closed, don't allow outside of range a-b
+#     #     * if closed (e.g. circle), allow to move back to beginning
+#     # 4)  if |(u* - u)C'(u)| < e1, halt
+#
+#     # todo: take value from STEP fields
+#     # check if surface closed along U and V
+#
+#     def closedV():
+#         return np.isclose([np.array(s[0]) - np.array(s[-1]) for s in S.ctrlpts2d], eps_bspline).all()
+#
+#     def closedU():
+#         return np.isclose(np.array(S.ctrlpts2d[0]) - np.array(S.ctrlpts2d[-1]), eps_bspline).all()  # eps_STEP_AP21
+#
+#     # S.delta = delta  # set evaluation delta
+#     # tradeoff between sample density and feature identification
+#
+#     # deltaFactor = 5
+#     # deltaFactor = 4
+#
+#     # S.delta_u = 1 / (S.ctrlpts_size_u * deltaFactor)
+#     # S.delta_v = 1 / (S.ctrlpts_size_v * deltaFactor)
+#
+#     S.delta_u = 1 / (len(S.knotvector_u) * deltaFactor)
+#     S.delta_v = 1 / (len(S.knotvector_v) * deltaFactor)
+#
+#     # if S.evalpts == None:  # evaluate surface points---------appears redundant
+#     #     S.evaluate()
+#
+#     def neighbouringUV(U, V, isClosedU, isClosedV):
+#
+#         for u in range(0, U - 2 + (2 * isClosedU)):
+#             for v in range(0, V - 2 + (2 * isClosedV)):
+#
+#                 if v == 0:
+#                     NW = (((u + 2) % U) * V)
+#                     N = (((u + 2) % U) * V) + 1
+#                     NE = (((u + 2) % U) * V) + 2
+#
+#                     W = (((u + 1) % U) * V)
+#                     C = (((u + 1) % U) * V) + 1
+#                     E = (((u + 1) % U) * V) + 2
+#
+#                     SW = ((u % U) * V)
+#                     S = ((u % U) * V) + 1
+#                     SE = ((u % U) * V) + 2
+#
+#                 if v >= 1:
+#                     NW = N
+#                     W = C  # central instance
+#                     SW = S
+#
+#                     N = NE
+#                     C = E
+#                     S = SE
+#
+#                     NE = (((u + 2) % U) * V) + ((v + 2) % V)
+#                     E = (((u + 1) % U) * V) + ((v + 2) % V)
+#                     SE = ((u % U) * V) + ((v + 2) % V)
+#
+#                 # print([NW, N, NE])
+#                 # print([W, C, E])
+#                 # print([SW, S, SE])
+#                 # print("==========")
+#                 # print([u, v, ((u * V) + v) ])
+#                 # print("==========")
+#
+#                 # if v==V - 2:
+#                 #     _1=1
+#
+#                 # if C==3:
+#                 #     _1=1
+#
+#                 yield ([NW, N, NE, W, C, E, SW, S, SE], (u, v))
+#
+#     # def _neighbouringUV(U, V, isClosedU, isClosedV):
+#     #     # generator function to yield neighbouring indices over a matrix of size U x V
+#     #
+#     #     openU = not isClosedU
+#     #     openV = not isClosedV
+#     #
+#     #     for u in range(openU, U - openU):
+#     #         for v in range(openV, V - openV):
+#     #
+#     #             if v == 0:  # closed in v direction
+#     #                 if u == U - 1:
+#     #                     NW = V - 1
+#     #                 else:
+#     #                     NW = ((u + 2) * V) + v - 1
+#     #
+#     #                 W = (V * (u + 1)) - 1
+#     #
+#     #                 if u == 0:
+#     #                     SW = (U * V) - 1  # V - 1
+#     #                 else:
+#     #                     SW = (u * V) - 1
+#     #
+#     #                 if u == U - 1:  # closed in u direction
+#     #                     N = v
+#     #                 else:
+#     #                     N = V * (u + 1)
+#     #
+#     #                 C = u * V
+#     #
+#     #                 if u == 0:
+#     #                     S = V * (U - 1)
+#     #                 else:
+#     #                     S = V * (u - 1)
+#     #
+#     #             if v == 1:
+#     #                 if u == U - 1:  # closed in u direction
+#     #                     NW = v - 1
+#     #                 else:
+#     #                     NW = ((u + 1) * V) + v - 1
+#     #
+#     #                 W = (u * V) + v - 1
+#     #
+#     #                 if u == 0:
+#     #                     SW = ((U - 1) * V) + v - 1
+#     #                 else:
+#     #                     SW = ((u - 1) * V) + v - 1
+#     #
+#     #                 if u == U - 1:  # closed in v direction
+#     #                     N = v
+#     #                 else:
+#     #                     N = ((u + 1) * V) + v
+#     #
+#     #                 C = (u * V) + v
+#     #
+#     #                 if u == 0:
+#     #                     S = ((U - 1) * V) + 1
+#     #                 else:
+#     #                     S = ((u - 1) * V) + v
+#     #
+#     #             if v > 1:
+#     #                 NW = N
+#     #                 W = C  # central instance
+#     #                 SW = S
+#     #
+#     #                 N = NE
+#     #                 C = E
+#     #                 S = SE
+#     #
+#     #             if v == V - 1:  # closed in v direction
+#     #                 if u < U - 1:
+#     #                     NE = (u + 1) * V
+#     #                 elif u == U - 1:  # closed in u direction
+#     #                     NE = 0
+#     #
+#     #                 if u < U - 1:
+#     #                     E = u * V
+#     #                 elif u == U - 1:
+#     #                     E = ((u - 1) * V) + v + 1
+#     #
+#     #                 if u == 0:
+#     #                     SE = ((U - 1) * V)
+#     #                 elif u < U - 1:
+#     #                     SE = (u - 1) * V
+#     #                 elif u == U - 1:
+#     #                     SE = ((u - 2) * V) + v + 1
+#     #
+#     #             elif v < V - 1:
+#     #                 if u < U - 1:  # only have to calculate this once per loop
+#     #                     NE = ((u + 1) * V) + v + 1
+#     #                 elif u == U - 1:  # closed in u direction
+#     #                     NE = v + 1
+#     #
+#     #                 if u < U - 1:  # only have to calculate this once per loop
+#     #                     E = (u * V) + v + 1
+#     #                 elif u == U - 1:
+#     #                     E = (u * V) + v + 1
+#     #
+#     #                 if u == 0:
+#     #                     SE = ((U - 1) * V) + v + 1
+#     #                 elif u < U - 1:  # only have to calculate this once per loop
+#     #                     SE = ((u - 1) * V) + v + 1
+#     #                 elif u == U - 1:
+#     #                     SE = ((u - 1) * V) + v + 1
+#     #
+#     #             # print([NW, N, NE])
+#     #             # print([W, C, E])
+#     #             # print([SW, S, SE])
+#     #             # print("==========")
+#     #
+#     #             yield ([NW, N, NE, W, C, E, SW, S, SE], (u, v))
+#
+#     def localNeighbourSearch(S):
+#         extremaUV = []
+#         extremaP = []
+#         maxBound = []
+#
+#         # not S.evalpts
+#         uSamples = np.linspace(S.knotvector_u[0],
+#                                S.knotvector_u[-1],
+#                                num=len(S.knotvector_u) * deltaFactor,
+#                                endpoint=~closedU())
+#         vSamples = np.linspace(S.knotvector_v[0],
+#                                S.knotvector_v[-1],
+#                                num=len(S.knotvector_v) * deltaFactor,
+#                                endpoint=~closedV())
+#         # uSamples = np.linspace(S.knotvector_u[0], S.knotvector_u[-1], num=len(S.knotvector_u) * deltaFactor)
+#         # vSamples = np.linspace(S.knotvector_v[0], S.knotvector_v[-1], num=len(S.knotvector_v) * deltaFactor)
+#         uvArray = np.zeros((len(uSamples) * len(vSamples), 2))
+#
+#         for vi, vS in enumerate(vSamples):
+#             for ui, uS in enumerate(uSamples):
+#                 uvArray[(ui * len(vSamples)) + vi] = [uS, vS]
+#
+#         pArray = np.array(S.evaluate_list(uvArray))
+#
+#         # test1 = S.evaluate_single(uvArray[0]) #(0.0, 0.0))
+#         # test2 = S.evaluate_single(uvArray[207]) #(0.0, 1.0))
+#         # minSample=[]
+#
+#         for CC, uv in neighbouringUV(len(uSamples), len(vSamples), closedU(), closedV()):
+#
+#             pNW = pArray[CC[0]]
+#             pN = pArray[CC[1]]
+#             pNE = pArray[CC[2]]
+#             pE = pArray[CC[3]]
+#             pC = pArray[CC[4]]
+#             pW = pArray[CC[5]]
+#             pSW = pArray[CC[6]]
+#             pS = pArray[CC[7]]
+#             pSE = pArray[CC[8]]
+#
+#             dpuv_NW = np.linalg.norm(p - pNW)
+#             dpuv_N = np.linalg.norm(p - pN)
+#             dpuv_NE = np.linalg.norm(p - pNE)
+#             dpuv_E = np.linalg.norm(p - pE)
+#             dpuv = np.linalg.norm(p - pC)
+#             dpuv_W = np.linalg.norm(p - pW)
+#             dpuv_SW = np.linalg.norm(p - pSW)
+#             dpuv_S = np.linalg.norm(p - pS)
+#             dpuv_SE = np.linalg.norm(p - pSE)
+#
+#             # testSample = [pNW, pN, pNE, pW, pC, pE, pSW, pS, pSE]
+#             # if ((dpuv_S <= dpuv_NW) and (dpuv_S <= dpuv_N) and (dpuv_S <= dpuv_NE) and
+#             #         (dpuv_S <= dpuv_W) and (dpuv_S <= dpuv_E) and
+#             #         (dpuv_S <= dpuv_SW) and (dpuv_S <= dpuv) and (dpuv_S <= dpuv_SE)):
+#             #     minSample.append(pS)
+#
+#             if maxSearch:
+#                 if ((dpuv >= dpuv_NW) and (dpuv >= dpuv_N) and (dpuv >= dpuv_NE) and
+#                         (dpuv >= dpuv_W) and (dpuv >= dpuv_E) and
+#                         (dpuv >= dpuv_SW) and (dpuv >= dpuv_S) and (dpuv >= dpuv_SE)):
+#                     # b_NW = np.linalg.norm(pC - pNW)
+#                     b_N = np.linalg.norm(pC - pN)
+#                     # b_NE = np.linalg.norm(pC - pNE)
+#                     b_E = np.linalg.norm(pC - pE)
+#
+#                     b_W = np.linalg.norm(pC - pW)
+#                     # b_SW = np.linalg.norm(pC - pSW)
+#                     b_S = np.linalg.norm(pC - pS)
+#                     # b_SE = np.linalg.norm(pC - pSE)
+#
+#                     maxBound.append(max([b_N, b_E, b_W, b_S]))
+#                     extremaUV.append(uvArray[CC[4]])  # uv[0]*S.sample_size_v + uv[1]
+#                     extremaP.append(pArray[CC[4]])
+#
+#             else:  # minS
+#                 if ((dpuv <= dpuv_NW) and (dpuv <= dpuv_N) and (dpuv <= dpuv_NE) and
+#                         (dpuv <= dpuv_W) and (dpuv <= dpuv_E) and
+#                         (dpuv <= dpuv_SW) and (dpuv <= dpuv_S) and (dpuv <= dpuv_SE)):
+#                     # where a point is orthogonal to a planar surface -> sphere radius test, or accept minima
+#
+#                     # b_NW = np.linalg.norm(pC - pNW)
+#                     b_N = np.linalg.norm(pC - pN)
+#                     # b_NE = np.linalg.norm(pC - pNE)
+#                     b_E = np.linalg.norm(pC - pE)
+#
+#                     b_W = np.linalg.norm(pC - pW)
+#                     # b_SW = np.linalg.norm(pC - pSW)
+#                     b_S = np.linalg.norm(pC - pS)
+#                     # b_SE = np.linalg.norm(pC - pSE)
+#
+#                     maxBound.append(max([b_N, b_E, b_W, b_S]))
+#                     extremaUV.append(uvArray[CC[4]])
+#                     extremaP.append(pArray[CC[4]])
+#
+#         return extremaUV, extremaP, maxBound
+#
+#     def curvatureSearch():
+#
+#         # not S.evalpts
+#         uSamples = np.linspace(S.knotvector_u[0],
+#                                S.knotvector_u[-1],
+#                                num=len(S.knotvector_u) * deltaFactor,
+#                                endpoint=~closedU())
+#         vSamples = np.linspace(S.knotvector_v[0],
+#                                S.knotvector_v[-1],
+#                                num=len(S.knotvector_v) * deltaFactor,
+#                                endpoint=~closedV())
+#         uvArray = np.zeros((len(uSamples) * len(vSamples), 2))
+#
+#         for vi, vS in enumerate(vSamples):
+#             for ui, uS in enumerate(uSamples):
+#                 uvArray[(ui * len(vSamples)) + vi] = [uS, vS]
+#
+#         pArray = np.array(S.evaluate_list(uvArray))
+#
+#         discreteK = [np.inf] * len(uvArray)
+#         for CC, uv in neighbouringUV(len(uSamples), len(vSamples), closedU(), closedV()):
+#
+#             puv = np.array(pArray[CC[4]])
+#             pur, pucc = radiusCentre3points(pArray[CC[3]], puv, pArray[CC[5]])
+#             pvr, pvcc = radiusCentre3points(pArray[CC[7]], puv, pArray[CC[1]])
+#
+#             # find media point of U curvature centre and V curvature, kuv
+#             if pur is np.inf and pvr is not np.inf:
+#                 kuv = pvcc - puv
+#             elif pur is not np.inf and pvr is np.inf:
+#                 kuv = pucc - puv
+#             elif pur is np.inf and pvr is np.inf:
+#                 discreteK[(S.sample_size_u * uv[0]) + uv[1]] = np.inf
+#                 break
+#             else:
+#                 kuv = ((pucc - puv) + (pvcc - puv)) / 2
+#
+#             dkuv = np.linalg.norm(kuv - puv)
+#
+#             if np.linalg.norm(p - puv) > np.linalg.norm(kuv - p):
+#                 # p is on the same side of the surface as the median curvature
+#                 discreteK[(S.sample_size_u * uv[0]) + uv[1]] = dkuv
+#
+#             if np.linalg.norm(p - puv) < np.linalg.norm(kuv - p):
+#                 # smallest radius, with curvature centre on far side of surface from p
+#                 discreteK[(S.sample_size_u * uv[0]) + uv[1]] = -dkuv
+#
+#             # todo: examine issue with non-colinear curve centre and projecting point
+#             # e.g. proj(p)
+#             #                 if np.dot(p - p1, pucc - p1)/np.linalg.norm(pucc - p1) > 0:
+#             #                     discreteK[i] = pur
+#             #                 else:
+#             #                     discreteK[i] = -pur
+#
+#         return discreteK
+#
+#     def localCurvatureExtrema(discreteK):
+#         leu = []
+#         # localExtremaP = []
+#         # maxBound = []
+#
+#         for CC, uv in neighbouringUV(len(S.knotvector_u) * deltaFactor,
+#                                      len(S.knotvector_v) * deltaFactor,
+#                                      closedU(), closedV()):
+#             surroundNodes = [CC[1], CC[3], CC[5], CC[7]]
+#
+#             if not any(discreteK[ssn] == np.inf for ssn in surroundNodes):
+#                 if maxSearch:
+#                     if (all((np.abs(discreteK[ssn]) >= discreteK[(S.sample_size_u * uv[0]) + uv[1]]) for ssn in
+#                             surroundNodes) and
+#                             (discreteK[(S.sample_size_u * uv[0]) + uv[1]] > 0)):
+#                         # this version excludes negative curves from surrounding curvature values
+#                         # if all(np.abs(discreteK[ssn]) > discreteK[S.sample_size_u * u + v] or
+#                         # (discreteK[ssn]<0) for ssn in surroundNodes) and
+#                         # (discreteK[S.sample_size_u * u + v] > 0):
+#
+#                         pC = np.array(S.evaluate_single(uv))
+#                         localExtremaP(pC)
+#                         maxBound.append(
+#                             max([np.linalg.norm(pC - np.array(S.evaluate_single(uvk))) for uvk in surroundNodes]))
+#                         leu.append(uv)
+#                 else:
+#                     if all((np.abs(discreteK[ssn]) >= discreteK[(S.sample_size_u * uv[0]) + uv[1]]) for ssn in
+#                            surroundNodes) and (discreteK[(S.sample_size_u * uv[0]) + uv[1]] < 0):
+#                         pC = np.array(S.evaluate_single(uv))
+#                         localExtremaP(pC)
+#                         maxBound.append(
+#                             max([np.linalg.norm(pC - np.array(S.evaluate_single(uvk))) for uvk in surroundNodes]))
+#                         leu.append(uv)
+#
+#         return leu
+#
+#     def subSearchUV(mpU, mpV, tol):
+#         # create simple subdivisions around a minimum point as simple hillclimb search
+#         tolFlag = 0
+#         divU = S.delta_u
+#         divV = S.delta_v
+#         dpuvlocal = np.linalg.norm(p - np.array(S.evaluate_single((mpU, mpV,))))
+#         # dpuvlocal = np.inner(p - np.array(S.evaluate_single((mpU, mpV,))))
+#
+#         while not tolFlag:
+#             divU /= 2
+#             divV /= 2
+#
+#             subDivs = [[mpU - divU, mpV + divV],
+#                        [mpU, mpV + divV],
+#                        [mpU + divU, mpV + divV],
+#                        [mpU - divU, mpV],
+#                        [mpU, mpV],
+#                        [mpU + divU, mpV],
+#                        [mpU - divU, mpV - divV],
+#                        [mpU, mpV - divV],
+#                        [mpU + divU, mpV - divV]]
+#
+#             for sdv in subDivs:
+#                 if sdv[0] > 1.0: sdv[0] = 1.0
+#                 if sdv[0] < 0.0: sdv[0] = 0.0
+#                 if sdv[1] > 1.0: sdv[1] = 1.0
+#                 if sdv[1] < 0.0: sdv[1] = 0.0
+#
+#             pSubDivs = S.evaluate_list(subDivs)
+#
+#             # test np.inner
+#             # dispUV = [np.inner(p - psd) for psd in pSubDivs]
+#
+#             dpuv_NW = np.linalg.norm(p - pSubDivs[0])
+#             dpuv_N = np.linalg.norm(p - pSubDivs[1])
+#             dpuv_NE = np.linalg.norm(p - pSubDivs[2])
+#
+#             dpuv_W = np.linalg.norm(p - pSubDivs[3])
+#             # dpuv = np.linalg.norm(p - pSubDivs[4])
+#             dpuv_E = np.linalg.norm(p - pSubDivs[5])
+#
+#             dpuv_SW = np.linalg.norm(p - pSubDivs[6])
+#             dpuv_S = np.linalg.norm(p - pSubDivs[7])
+#             dpuv_SE = np.linalg.norm(p - pSubDivs[8])
+#
+#             dispUV = [dpuv_NW,
+#                       dpuv_N,
+#                       dpuv_NE,
+#                       dpuv_W,
+#                       # dpuvlocal,
+#                       dpuv_E,
+#                       dpuv_SW,
+#                       dpuv_S,
+#                       dpuv_SE]
+#
+#             if maxSearch:
+#                 if np.abs(max(dispUV) - dpuvlocal) >= tol:
+#                     # np.abs(max(dispUV) - dpuvlocal) >= tol:
+#                     maxUVindex = dispUV.index(max(dispUV))
+#                     mpU = subDivs[maxUVindex][0]
+#                     mpV = subDivs[maxUVindex][1]
+#                     dpuvlocal = max(dispUV)
+#                 else:
+#                     tolFlag += 1
+#             else:
+#                 if np.abs(min(dispUV) - dpuvlocal) >= tol:
+#                     minUVindex = dispUV.index(min(dispUV))
+#                     mpU = subDivs[minUVindex][0]
+#                     mpV = subDivs[minUVindex][1]
+#                     dpuvlocal = min(dispUV)
+#                 else:
+#                     tolFlag += 1
+#         return (mpU, mpV,)
+#
+#     def NewtonRaphson(cuv, maxits=5):
+#
+#         # def f(uv):
+#         #     return surface.derivatives(uv[0], uv[1], 2)
+#
+#         # e[0][0], the surface point itself
+#         # e[0][1], the 1st derivative w.r.t. v
+#         # e[2][1], the 2nd derivative w.r.t. u and 1st derivative w.r.t. v
+#
+#         def n(uv, e, r):  # np.array inputs
+#             #   f = Su(u,v) * r = 0
+#             #   g = Sv(u,v) * r = 0
+#
+#             Su = e[1][0]
+#             Sv = e[0][1]
+#
+#             Suu = e[2][0]
+#             Svv = e[0][2]
+#
+#             Suv = e[1][1]
+#             Svu = e[1][1]
+#
+#             f = np.dot(Su, r)
+#             g = np.dot(Sv, r)
+#             k = [-f, -g]
+#
+#             J00 = np.dot(Su, Su) + np.dot(Suu, r)
+#             J01 = np.dot(Su, Sv) + np.dot(Suv, r)
+#             J10 = np.dot(Su, Sv) + np.dot(Svu, r)
+#             J11 = np.dot(Sv, Sv) + np.dot(Svv, r)
+#
+#             # d =   [ u* - u, v* - v ]
+#             # k = - [ f(u,v), g(u,v) ]
+#             # J =   |Su|^2   +  Suu * r       Su*Sv  +  Suv * r
+#             #        Su*Sv   +  Svu * r      |Sv|^2  +  Svv * r
+#
+#             J = [[J00, J01], [J10, J11]]
+#             d = np.linalg.solve(J, k)
+#             return d + uv
+#
+#         i = 0
+#         # e = None
+#         while i < maxits:
+#             if (cuv[0] < 0) or (cuv[0] > 1) or (cuv[1] < 0) or (cuv[1] > 1):
+#                 return (np.inf, np.inf)  # derivatives sometimes > |2|
+#
+#             # test = S.derivatives(1.0, 0.0, 0)
+#
+#             e = np.array(S.derivatives(cuv[0], cuv[1], 2))
+#             dif = e[0][0] - p  # e[0][0] is surface point evaluated at cuv(u,v)
+#             c1v = np.linalg.norm(dif)
+#             c1 = c1v < eps1  # |S(u,v) - p| < e1 (point coincidence)
+#
+#             #  |Su(u,v)*(S(u,v) - P)|
+#             #  ----------------------  < e2 (cosine minima)
+#             #  |Su(u,v)| |S(u,v) - P|
+#
+#             c2an = np.dot(e[1][0], dif)
+#             c2ad = np.linalg.norm(e[1][0]) * c1v
+#             c2av = c2an / c2ad
+#             c2a = c2av < eps2
+#
+#             #  |Sv(u,v)*(S(u,v) - P)|
+#             #  ----------------------  < e2 (cosine minima)
+#             #  |Sv(u,v)| |S(u,v) - P|
+#
+#             c2bn = np.dot(e[0][1], dif)
+#             c2bd = np.linalg.norm(e[0][1]) * c1v
+#             c2bv = c2bn / c2bd
+#             c2b = c2bv < eps2
+#
+#             # exit if all tolerance are met,
+#             if (c1 and c2a and c2b):
+#                 return cuv
+#
+#             # otherwise, take a step
+#             ct = n(cuv, e, dif)
+#
+#             #  correct for exceeding bounds
+#             if ct[0] < S.knotvector_u[0]:  # [ maxu - ( ct[0] - minu ), ct[1] ]
+#                 if closedU():
+#                     ct = [S.knotvector_u[-1] - (S.knotvector_u[0] - ct[0]), ct[1]]
+#                 # if closedU(): ct = [S.knotvector_u[0] + ct[0] % (S.knotvector_u[-1] - S.knotvector_u[0]), ct[1]]
+#                 else:
+#                     ct = [S.knotvector_u[0] + eps_bspline, ct[1]]
+#
+#             elif ct[0] > S.knotvector_u[-1]:
+#                 if closedU():
+#                     ct = [S.knotvector_u[0] + (ct[0] - S.knotvector_u[-1]), ct[1]]
+#                 # if closedU(): ct = [S.knotvector_u[-1] - ct[0] % (S.knotvector_u[-1] - S.knotvector_u[0]), ct[1]]
+#                 else:
+#                     ct = [S.knotvector_u[-1] - eps_bspline, ct[1]]
+#
+#             if ct[1] < S.knotvector_v[0]:
+#                 if closedV():
+#                     ct = [ct[0], S.knotvector_v[-1] - (S.knotvector_v[0] - ct[1])]
+#                 # if closedV(): ct = [ct[0], S.knotvector_v[0] + ct[1] % (S.knotvector_v[-1] - S.knotvector_v[0])]
+#                 else:
+#                     ct = [ct[0], S.knotvector_v[0] + eps_bspline]
+#
+#             elif ct[1] > S.knotvector_v[-1]:
+#                 # if closedV(): ct = [ct[0], S.knotvector_v[0] + (ct[1] - S.knotvector_v[-1])]
+#                 if closedV():
+#                     ct = [ct[0], S.knotvector_v[-1] - ct[1] % (S.knotvector_v[-1] - S.knotvector_v[0])]
+#                 else:
+#                     ct = [ct[0], S.knotvector_v[-1] - eps_bspline]
+#
+#             c3v0 = np.linalg.norm((ct[0] - cuv[0]) * e[1][0])
+#             c3v1 = np.linalg.norm((ct[1] - cuv[1]) * e[0][1])
+#
+#             # if |(u* - u) C'(u)| < e1, halt
+#             if (c3v0 + c3v1 < eps1):
+#                 return cuv
+#             cuv = ct
+#             i += 1
+#
+#         if i == maxits:  # Newton-Raphson fails
+#             return (np.inf, np.inf)
+#         return cuv
+#
+#     if curvatureTest:  # discrete grid summing curvatures along U and V axes
+#         localExtremaUV, localExtremaP, maxBound = localCurvatureExtrema(curvatureSearch())
+#     else:
+#         localExtremaUV, localExtremaP, maxBound = localNeighbourSearch(S)
+#
+#     if len(localExtremaUV) == 0: return []
+#
+#     extremaUV = []
+#     for luv, lp, mb in zip(localExtremaUV, localExtremaP, maxBound):
+#         mUV = NewtonRaphson(luv)
+#
+#         if not np.inf in mUV:
+#             # find a maximum deviation to indicate when N-R fails
+#             if np.linalg.norm(lp - np.array(S.evaluate_single(mUV))) <= mb:
+#                 extremaUV.append(mUV)
+#             else:
+#                 mUV = (np.inf, np.inf)
+#         if np.inf in mUV:
+#             # Newton-Raphson fail, try hillclimb
+#             mUV = subSearchUV(luv[0], luv[1], eps_bspline)
+#             extremaUV.append(mUV)
+#         # print(S.evalpts[(S.sample_size_u * luv[0]) + luv[1]])
+#
+#     # filter out identical values
+#     extremaUnique = []
+#     for m in extremaUV:
+#         # displacement between any 2 points < eps1
+#         # compare u, v individually to reduce comparison pool
+#         if not any([np.isclose(m, u, eps1).all() for u in extremaUnique]):
+#             extremaUnique.append(m)
+#
+#     if (localExtrema and (
+#             len(extremaUnique) == 1)) or not localExtrema:  # if there is only one extrema, localextrema is moot
+#         if uv_xyz:
+#             return extremaUnique  # return single value in list for compatibility
+#         else:
+#             return [np.array(S.evaluate_single(extremaUnique[0])), ]
+#     else:
+#         if localExtrema:
+#             if uv_xyz:
+#                 return extremaUnique
+#             else:
+#                 return S.evaluate_list(extremaUnique)
+#         else:  # return single maxima
+#             extremaUniquePoint = S.evaluate_list(extremaUnique)
+#             dispsExtrema = [np.linalg.norm(np.array(e) - p) for e in extremaUniquePoint]
+#             if maxSearch:  # return single value in list for compatibility
+#                 if uv_xyz:
+#                     return [extremaUnique[dispsExtrema.index(max(dispsExtrema))], ]
+#                 else:
+#                     return [np.array(extremaUniquePoint[dispsExtrema.index(max(dispsExtrema))]), ]
+#             else:  # minsearch
+#                 if uv_xyz:
+#                     return [extremaUnique[dispsExtrema.index(min(dispsExtrema))], ]
+#                 else:
+#                     return [np.array(extremaUniquePoint[dispsExtrema.index(min(dispsExtrema))]), ]
 
 
 def BsplineCurveExtremaDisp(C, p,
@@ -3958,7 +4550,7 @@ def BSplineSurfaceWithKnotsParse(AFSobj, c, calcExtrema=False):
     minima = [False, ] * len(maxPoints) + [True, ] * len(minPoints)
 
     extremaUV = maxPointsUV + minPointsUV
-    extremaUV = [euv.tolist() for euv in extremaUV]
+    #extremaUV = [euv.tolist() for euv in extremaUV]
     maximaPoints = maxPoints + minPoints
     if len(maximaPoints) > 1:
         # create explicit dtype fields to permit sorting via u, then v
@@ -4923,7 +5515,7 @@ testDir = os.path.normpath(r"/media/foobert/Dell2HDD/STEP_test_files")
 #filepath = "TiltedCylinder3.step" #PASS2
 #filepath = "primitives/Cube/unit_cube.stp" # pass2
 #filepath = "Drexel_blended_ellipse_plain.step" # fail, no surfaces ellipse
-#filepath = "Drexel_blended_cylinder.step" # pass2
+filepath = "Drexel_blended_cylinder.step" # pass2
 #filepath = "DrexelBlendedCylinder_curvedBlend.step" # pass2
 #filepath = "TiltedCylinder.step" # pass2
 #filepath = "Synth_ellipse_plain.step" # pass (no Advanced Face Surface)
@@ -4931,8 +5523,8 @@ testDir = os.path.normpath(r"/media/foobert/Dell2HDD/STEP_test_files")
 #filepath = primitivesDir + os.sep + "Cube/unit_cube.stp" #PASS2
 # OFF format
 #filepath = "bed_0001.off"
-filepath = "testOFF.off"
-filepath = "primitives/Cube/unit_cube.stp"
+#filepath = "testOFF.off"
+#filepath = "primitives/Cube/unit_cube.stp"
 
 try:
     # filepath check
@@ -5378,6 +5970,10 @@ def getPointFeatures(AFSobj):
                         maxPFlen = max([len(pfs['u']) for pfs in pfSurround]) - 1
                         if maxPFlen > 1:
                             crawlindex = 1
+                            if type(maxPFlen) is not int:
+                                _1=1
+                            if type(crawlindex) is not int:
+                                _1=1
                             while crawlindex < maxPFlen:
                                 # should capture all local max/min before second vertex
                                 for pfsIndex, pfs in enumerate(pfSurround):
@@ -5476,74 +6072,98 @@ def getPointFeatures(AFSobj):
         'SURFACE_OF_REVOLUTION',
         'BOUNDED_SURFACE']
 
-    # todo logic for NURBS
+    # todo logic for NURBS - like simple surfaces, NURBS surfaces must include estimation of maxima/minima at edges 30/09/24
+
+    # NURBS surfaces: recall that every extrema is unique from its neighbours, meaning that it constitutes a local maxima/minima
+    # and may be included with a total tally of minima without consideration of edge maxima/minima
+
+    complexSurfSet = []
+
     for spf_index, spf_adj in enumerate(surfaceEdgeFeature['adjRef']):
 
         surfSet = list(spf_adj.values())[0]
         featureRef = list(spf_adj.keys())[0]
-        # test all surfaces are single minima/maxima types
-        if all([AFSobj[adjSurf]['SurfaceTypeName'] in singleExtremaSurface for adjSurf in surfSet]):
 
-            if surfaceEdgeFeature['maxima'][spf_index]:
-                if all([AFSobj[adjSurf]['ParsedSurface']['pointFeature']['maxima'][0] for adjSurf in surfSet]) :
+        # remove NURBS surfaces from surfSet
+        simpleSurfSet = [adjSurf for adjSurf in surfSet if AFSobj[adjSurf]['SurfaceTypeName'] in singleExtremaSurface]
+        [complexSurfSet.append(css) for css in surfSet if css not in simpleSurfSet and css not in complexSurfSet]
 
-                    surroundDisps = [AFSobj[adjSurf]['ParsedSurface']['pointFeature']['centroidDisp'] for adjSurf in surfSet]
-                    featureDisp = surfaceEdgeFeature['centroidDisp'][spf_index]
+        # # test all surfaces are single minima/maxima types
+        # if all([AFSobj[adjSurf]['SurfaceTypeName'] in singleExtremaSurface for adjSurf in surfSet]):
 
-                    if all([featureDisp >= (sd + eps_STEP_AP21) for sd in surroundDisps]) and (featureRef not in surfaceFeature['featureRef']):
-                        # assign featureDisp local maxima
-                        surfaceFeature['xyz'].append(surfaceEdgeFeature['xyz'][spf_index])
-                        surfaceFeature['centroidDisp'].append(surfaceEdgeFeature['centroidDisp'][spf_index])
-                        surfaceFeature['maxima'].append(True)
-                        surfaceFeature['minima'].append(False)
-                        surfaceFeature['featureRef'].append(featureRef)
+        # maxima features
+        if surfaceEdgeFeature['maxima'][spf_index]:
+            if all([AFSobj[adjSurf]['ParsedSurface']['pointFeature']['maxima'][0] for adjSurf in simpleSurfSet]) :
 
-                    for sds_index, sds in enumerate(surroundDisps):
-                        if all([(sds - eps_STEP_AP21) >= sd for sd in surroundDisps]) and \
-                                (AFSobj[surfSet[sds_index]]['SurfaceRef'] not in surfaceFeature['featureRef']):
-                            surfaceFeature['xyz'].append(AFSobj[surfSet[sds_index]]['ParsedSurface']['pointFeature']['xyz'][0].tolist())
-                            surfaceFeature['centroidDisp'].append(AFSobj[surfSet[sds_index]]['ParsedSurface']['pointFeature']['centroidDisp'][0])
-                            surfaceFeature['maxima'].append(True)
-                            surfaceFeature['minima'].append(False)
-                            surfaceFeature['featureRef'].append(AFSobj[surfSet[sds_index]]['SurfaceRef'])
+                surroundDisps = [AFSobj[adjSurf]['ParsedSurface']['pointFeature']['centroidDisp'] for adjSurf in simpleSurfSet]
+                featureDisp = surfaceEdgeFeature['centroidDisp'][spf_index]
 
-                elif (featureRef not in surfaceFeature['featureRef']): # feature is maxima unique
+                if all([featureDisp >= (sd + eps_STEP_AP21) for sd in surroundDisps]) and (featureRef not in surfaceFeature['featureRef']):
+                    # assign featureDisp local maxima
                     surfaceFeature['xyz'].append(surfaceEdgeFeature['xyz'][spf_index])
                     surfaceFeature['centroidDisp'].append(surfaceEdgeFeature['centroidDisp'][spf_index])
                     surfaceFeature['maxima'].append(True)
                     surfaceFeature['minima'].append(False)
                     surfaceFeature['featureRef'].append(featureRef)
 
-            # minima features
-            if surfaceEdgeFeature['minima'][spf_index]:
-                if all([AFSobj[adjSurf]['ParsedSurface']['pointFeature']['minima'][0] for adjSurf in surfSet]):
+                for sds_index, sds in enumerate(surroundDisps):
+                    if all([(sds - eps_STEP_AP21) >= sd for sd in surroundDisps]) and \
+                            (AFSobj[simpleSurfSet[sds_index]]['SurfaceRef'] not in surfaceFeature['featureRef']):
+                        surfaceFeature['xyz'].append(AFSobj[simpleSurfSet[sds_index]]['ParsedSurface']['pointFeature']['xyz'][0].tolist())
+                        surfaceFeature['centroidDisp'].append(AFSobj[simpleSurfSet[sds_index]]['ParsedSurface']['pointFeature']['centroidDisp'][0])
+                        surfaceFeature['maxima'].append(True)
+                        surfaceFeature['minima'].append(False)
+                        surfaceFeature['featureRef'].append(AFSobj[simpleSurfSet[sds_index]]['SurfaceRef'])
 
-                    surroundDisps = [AFSobj[adjSurf]['ParsedSurface']['pointFeature']['centroidDisp'][0] for adjSurf in surfSet]
-                    featureDisp = surfaceEdgeFeature['centroidDisp'][spf_index]
+            elif (featureRef not in surfaceFeature['featureRef']): # feature is maxima unique
+                surfaceFeature['xyz'].append(surfaceEdgeFeature['xyz'][spf_index])
+                surfaceFeature['centroidDisp'].append(surfaceEdgeFeature['centroidDisp'][spf_index])
+                surfaceFeature['maxima'].append(True)
+                surfaceFeature['minima'].append(False)
+                surfaceFeature['featureRef'].append(featureRef)
 
-                    if all([featureDisp <= (sd - eps_STEP_AP21) for sd in surroundDisps]) and (featureRef not in surfaceFeature['featureRef']):
-                        # assign featureDisp local maxima
-                        surfaceFeature['xyz'].append(surfaceEdgeFeature['xyz'][spf_index])
-                        surfaceFeature['centroidDisp'].append(surfaceEdgeFeature['centroidDisp'][spf_index])
-                        surfaceFeature['maxima'].append(False)
-                        surfaceFeature['minima'].append(True)
-                        surfaceFeature['featureRef'].append(featureRef)
+        # minima features
+        if surfaceEdgeFeature['minima'][spf_index]:
+            if all([AFSobj[adjSurf]['ParsedSurface']['pointFeature']['minima'][0] for adjSurf in simpleSurfSet]):
 
-                    for sds_index, sds in enumerate(surroundDisps):
-                        if all([(sds - eps_STEP_AP21) <= sd for sd in surroundDisps]) and \
-                                (AFSobj[surfSet[sds_index]]['SurfaceRef'] not in surfaceFeature['featureRef']):
-                            surfaceFeature['xyz'].append(AFSobj[surfSet[sds_index]]['ParsedSurface']['pointFeature']['xyz'][0].tolist())
-                            surfaceFeature['centroidDisp'].append(AFSobj[surfSet[sds_index]]['ParsedSurface']['pointFeature']['centroidDisp'][0])
-                            surfaceFeature['maxima'].append(False)
-                            surfaceFeature['minima'].append(True)
-                            surfaceFeature['featureRef'].append(AFSobj[surfSet[sds_index]]['SurfaceRef'])
+                surroundDisps = [AFSobj[adjSurf]['ParsedSurface']['pointFeature']['centroidDisp'][0] for adjSurf in simpleSurfSet]
+                featureDisp = surfaceEdgeFeature['centroidDisp'][spf_index]
 
-                elif (featureRef not in surfaceFeature['featureRef']):
+                if all([featureDisp <= (sd - eps_STEP_AP21) for sd in surroundDisps]) and (featureRef not in surfaceFeature['featureRef']):
+                    # assign featureDisp local maxima
                     surfaceFeature['xyz'].append(surfaceEdgeFeature['xyz'][spf_index])
                     surfaceFeature['centroidDisp'].append(surfaceEdgeFeature['centroidDisp'][spf_index])
                     surfaceFeature['maxima'].append(False)
                     surfaceFeature['minima'].append(True)
                     surfaceFeature['featureRef'].append(featureRef)
+
+                for sds_index, sds in enumerate(surroundDisps):
+                    if all([(sds - eps_STEP_AP21) <= sd for sd in surroundDisps]) and \
+                            (AFSobj[simpleSurfSet[sds_index]]['SurfaceRef'] not in surfaceFeature['featureRef']):
+                        surfaceFeature['xyz'].append(AFSobj[simpleSurfSet[sds_index]]['ParsedSurface']['pointFeature']['xyz'][0].tolist())
+                        surfaceFeature['centroidDisp'].append(AFSobj[simpleSurfSet[sds_index]]['ParsedSurface']['pointFeature']['centroidDisp'][0])
+                        surfaceFeature['maxima'].append(False)
+                        surfaceFeature['minima'].append(True)
+                        surfaceFeature['featureRef'].append(AFSobj[simpleSurfSet[sds_index]]['SurfaceRef'])
+
+            elif (featureRef not in surfaceFeature['featureRef']):
+                surfaceFeature['xyz'].append(surfaceEdgeFeature['xyz'][spf_index])
+                surfaceFeature['centroidDisp'].append(surfaceEdgeFeature['centroidDisp'][spf_index])
+                surfaceFeature['maxima'].append(False)
+                surfaceFeature['minima'].append(True)
+                surfaceFeature['featureRef'].append(featureRef)
+
+    for css in complexSurfSet:
+        for css_index, css_maxima in enumerate(AFSobj[css]['ParsedSurface']['pointFeature']['maxima']):
+            surfaceFeature['xyz'].append(AFSobj[css]['ParsedSurface']['pointFeature']['xyz'][css_index])
+            surfaceFeature['centroidDisp'].append(AFSobj[css]['ParsedSurface']['pointFeature']['centroidDisp'][css_index])
+            surfaceFeature['featureRef'].append(AFSobj[css]['SurfaceRef'])
+            if css_maxima:  # assign featureDisp local maxima
+                surfaceFeature['maxima'].append(True)
+                surfaceFeature['minima'].append(False)
+            else:
+                surfaceFeature['maxima'].append(False)
+                surfaceFeature['minima'].append(True)
 
     surfaceSphericalFeature = dict()
     surfaceSphericalFeature['rotSymCentre'] = []
