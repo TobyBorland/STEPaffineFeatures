@@ -8,6 +8,8 @@ from stepcode.Part21 import Parser
 import os, glob, re
 from pprint import pprint # only debug printout
 
+# alternative to object, from types import SimpleNamespace
+
 # NURBS-Python (geomdl) is a self-contained, object-oriented pure Python B-Spline and NURBS library
 # geomdl v5.3.1
 # Please refer to the following DOI link to access the article:
@@ -36,12 +38,13 @@ from geomdl import utilities
 import numpy as np
 
 # eps machine precision constant
-eps = np.finfo(float).eps
+eps = np.finfo(float).eps # float comparison
 eps_STEP_AP21 = 1e-6  # STEP precision seems to end here
 
 # eps_bspline = 1E-10 # precision used in bspline/NURB surface subroutines
-# machine_EPS = np.finfo(float).eps # float comparison
 
+# keep a global tally of the highest reference value
+maxRefValue = 0
 
 def FreeCADpointSyntax(A, color=(0., 0., 0.)):
     """print the instructions to create a FreeCAD model of a list of points"""
@@ -2407,10 +2410,6 @@ def curveEnclosingRectangle(v1, v2, centreP, normV, radius):
     return [p1, p2, p3, p4]
 
 
-
-
-
-
 # The geometry used in the definition of the face shall be restricted.
 # The face geometry shall be an elementary surface, swept surface, or b-spline surface;
 # The geometry of all bounding edges of the face shall be fully defined as edge curves;
@@ -2480,14 +2479,14 @@ def segmentParse(c, ParsedEdge, calcExtrema=False):
                                                                            ParsedEdge['vertex2'])
 
         # recalculated every centroid update
-        ParsedEdge['pointFeature']['xyz'] = [ParsedEdge['vertex1'],
-                                             ParsedEdge['vertex2']]
+        ParsedEdge['pointFeature']['xyz'] = [ParsedEdge['vertex1'].tolist(),
+                                             ParsedEdge['vertex2'].tolist()]
         ParsedEdge['pointFeature']['centroidDisp'] = [np.linalg.norm(c - ParsedEdge['vertex1']).item(),
                                                       np.linalg.norm(c - ParsedEdge['vertex2']).item()]
         ParsedEdge['pointFeature']['u'] = [0, 1]  # normalise to [0, 1]
 
         if not v1ext and not v2ext:
-            ParsedEdge['pointFeature']['xyz'].insert(1, minPoint)
+            ParsedEdge['pointFeature']['xyz'].insert(1, minPoint.tolist())
             ParsedEdge['pointFeature']['centroidDisp'].insert(1, minPointCentroidDisp)
             u = np.linalg.norm(minPoint - ParsedEdge['vertex1']) / np.linalg.norm(ParsedEdge['vertex2'] - ParsedEdge['vertex1'])
             ParsedEdge['pointFeature']['u'].insert(1, u)
@@ -4618,7 +4617,7 @@ def BSplineSurfaceWithKnotsParse(AFSobj, c, calcExtrema=False):
     AFSobj['ParsedSurface'] = ParsedSurface
 
 
-def planeSurfaceParse_2(AFSobj, c, calcExtrema=False):
+def planeSurfaceParse(AFSobj, c, calcExtrema=False):
     '''
     Parse a planar surface, optionally extract surface minima points relative to a
     local centroid point.
@@ -4637,6 +4636,9 @@ def planeSurfaceParse_2(AFSobj, c, calcExtrema=False):
 
     # with a planar surface, closest point is that point closest to orthogonal intersection of ray through
     # centroid with plane of surface
+
+    # if AFSobj['SurfaceRef'] == '#64': #66
+    #     _1=1
 
     if AFSobj.get('ParsedSurface') is not None:  # recalculation of max/min
         ParsedSurface = AFSobj['ParsedSurface']
@@ -4666,12 +4668,48 @@ def planeSurfaceParse_2(AFSobj, c, calcExtrema=False):
     # project centroid to plane defined by normDir and axisPoint
     surfaceMinPoint = c - np.dot(c - axisPoint, normDir) * normDir
 
+    # # exception where centroid is within surface
+    # if np.linalg.norm(surfaceMinPoint - c) < eps:
+    #     _1=1
+
     if insideOutsideSurfaceTest(c, surfaceMinPoint, AFSobj):  # minima is among edges
         # replace not append on every calculation
-        ParsedSurface['pointFeature']['xyz'] = [surfaceMinPoint]
+        ParsedSurface['pointFeature']['xyz'] = [surfaceMinPoint.tolist()]
         ParsedSurface['pointFeature']['centroidDisp'] = [np.linalg.norm(surfaceMinPoint - c)]
         ParsedSurface['pointFeature']['maxima'] = [False, ]
         ParsedSurface['pointFeature']['minima'] = [True, ]
+    # else:
+    #     # minimum/max point is among minima/max points and vertices
+    #     #_1=1
+    #
+    #     minCentroidDisp = min(AFSobj['outerBoundEdgeLoop'][0]['pointFeature']['centroidDisp'])
+    #     min_index = AFSobj['outerBoundEdgeLoop'][0]['pointFeature']['centroidDisp'].index(minCentroidDisp)
+    #     #min_u = AFSobj['outerBoundEdgeLoop'][0]['pointFeature']['u'][min_index]
+    #     min_xyz = AFSobj['outerBoundEdgeLoop'][0]['pointFeature']['xyz'][min_index]
+    #
+    #     maxCentroidDisp = max(AFSobj['outerBoundEdgeLoop'][0]['pointFeature']['centroidDisp'])
+    #     max_index = AFSobj['outerBoundEdgeLoop'][0]['pointFeature']['centroidDisp'].index(maxCentroidDisp)
+    #     #max_u = AFSobj['outerBoundEdgeLoop'][0]['pointFeature']['u'][max_index]
+    #     max_xyz = AFSobj['outerBoundEdgeLoop'][0]['pointFeature']['xyz'][max_index]
+    #
+    #     for obel in AFSobj['outerBoundEdgeLoop']:
+    #         if min(obel['pointFeature']['centroidDisp']) < minCentroidDisp:
+    #             minCentroidDisp = min(obel['pointFeature']['centroidDisp'])
+    #             min_index = obel['pointFeature']['centroidDisp'].index(minCentroidDisp)
+    #             #min_u = obel['pointFeature']['u'][min_index]
+    #             min_xyz = obel['pointFeature']['xyz'][min_index]
+    #
+    #         if max(obel['pointFeature']['centroidDisp']) > maxCentroidDisp:
+    #             maxCentroidDisp = max(obel['pointFeature']['centroidDisp'])
+    #             max_index = obel['pointFeature']['centroidDisp'].index(maxCentroidDisp)
+    #             #max_u = obel['pointFeature']['u'][max_index]
+    #             max_xyz = obel['pointFeature']['xyz'][max_index]
+    #
+    #     ParsedSurface['pointFeature']['xyz'] = [min_xyz, max_xyz]
+    #     ParsedSurface['pointFeature']['centroidDisp'] = [minCentroidDisp, maxCentroidDisp]
+    #     ParsedSurface['pointFeature']['maxima'] = [False, True]
+    #     ParsedSurface['pointFeature']['minima'] = [True, False]
+
 
     AFSobj['ParsedSurface'] = ParsedSurface
 
@@ -4719,7 +4757,7 @@ def surfaceParse(AFSobj, c, calcExtrema=True):
             coneSurfaceParse(AFSobj, c, calcExtrema)
 
         if AFSobj['SurfaceTypeName'] == 'PLANE':
-            planeSurfaceParse_2(AFSobj, c, calcExtrema)
+            planeSurfaceParse(AFSobj, c, calcExtrema)
 
         if AFSobj['SurfaceTypeName'] == 'B_SPLINE_SURFACE_WITH_KNOTS':
             BSplineSurfaceWithKnotsParse(AFSobj, c, calcExtrema)
@@ -5176,9 +5214,13 @@ def insideOutsideSurfaceTest(c, mPoint, AFSobj, verbose=False):
     #         return False
 
     if AFSobj['SurfaceTypeName'] in ['PLANE', ]:  # full circle
+        # value near zero => projected point outside edges
+        # value near 2pi => projected point inside edges
         if (np.abs(edgeTotalAngle) < eps_STEP_AP21) and (len(AFSobj['outerBoundEdgeLoop']) < 2):
             return True
-        elif ((np.abs(edgeTotalAngle) % (2 * np.pi)) < eps_STEP_AP21) and (len(AFSobj['outerBoundEdgeLoop']) > 1):
+        #elif (np.abs(edgeTotalAngle) > eps_STEP_AP21) and ( (np.abs(edgeTotalAngle) % (2 * np.pi)) < eps_STEP_AP21) and (len(AFSobj['outerBoundEdgeLoop']) > 1):
+        # straight angle (point at edge) will return zero radian -> pi
+        elif (np.abs(edgeTotalAngle) > eps_STEP_AP21) and ((np.abs(edgeTotalAngle) % np.pi) < eps_STEP_AP21) and (len(AFSobj['outerBoundEdgeLoop']) > 1):
             return True
         else:
             return False
@@ -5269,7 +5311,7 @@ def parseStepcodePart21object():
     return AFSobj
 
 
-def getConvexHullPointSetSTEP(STEPobj):
+def getConvexHullPointSetSTEP():
     """first trawl of cartesian points and features from STEP object file prior to parsing as AdvancedFaceSurface object"""
     # get convex hull points of model in order to determine a reliable median centroid (not applicable to OFF format)
     # exclude Advanced_brep_shape_representation which contains a [0,0,0] origin point, e.g.
@@ -5318,10 +5360,108 @@ def calculateEdgeMaxMin(AFSobj):
 
 # ============================================================ OFF parse
 
+def surfaceGlobalExtrema(afs):
+    """identify the global minima/maxima points of an unique surface"""
+
+    # if afs['SurfaceRef'] == '#62':
+    #     _1=1
+
+    allCentroidDisp = []
+    for obel in afs['outerBoundEdgeLoop']:
+        allCentroidDisp.append(obel['pointFeature']['centroidDisp'])
+
+    allCentroidDisp = sum(allCentroidDisp, []) #flatten
+
+    minCentroidDisp = min(allCentroidDisp)
+    maxCentroidDisp = max(allCentroidDisp)
+    min_xyz = []
+    max_xyz = []
+
+    for obel in afs['outerBoundEdgeLoop']:
+        for u_index in range(0, len(obel['pointFeature']['u'])):
+            if np.isclose(minCentroidDisp, obel['pointFeature']['centroidDisp'][u_index]):
+                if not array3x1match(obel['pointFeature']['xyz'][u_index], min_xyz):
+                    min_xyz.append(obel['pointFeature']['xyz'][u_index])
+                    # exclude if an edge minima
+                    # if array3x1match(obel['pointFeature']['xyz'][u_index], afs['ParsedSurface']['pointFeature']['xyz']):
+                    #     _1=1
+
+            if np.isclose(maxCentroidDisp, obel['pointFeature']['centroidDisp'][u_index]):
+                if not array3x1match(obel['pointFeature']['xyz'][u_index], max_xyz):
+                    max_xyz.append(obel['pointFeature']['xyz'][u_index])
+                    # exclude if an edge minima
+                    # if array3x1match(obel['pointFeature']['xyz'][u_index], afs['ParsedSurface']['pointFeature']['xyz']):
+                    #     _1 = 1
+
+
+    afs['globalExtrema'] = {'xyz':[], 'centroidDisp':[], 'maxima':[], 'minima':[]}
+
+    for mxyz in max_xyz:
+        afs['globalExtrema']['xyz'].append(mxyz)
+        afs['globalExtrema']['centroidDisp'].append(maxCentroidDisp)
+        afs['globalExtrema']['maxima'].append(True)
+        afs['globalExtrema']['minima'].append(False)
+
+    for mxyz in min_xyz:
+        afs['globalExtrema']['xyz'].append(mxyz)
+        afs['globalExtrema']['centroidDisp'].append(minCentroidDisp)
+        afs['globalExtrema']['maxima'].append(False)
+        afs['globalExtrema']['minima'].append(True)
+
+# def surfaceGlobalExtrema_(AFSobj):
+#     """identify the global minima/maxima points of an unique surface"""
+#     for afs in AFSobj:
+#         if afs['SurfaceRef'] == '#67':
+#             _1=1
+#         minCentroidDisp = min(afs['outerBoundEdgeLoop'][0]['pointFeature']['centroidDisp'])
+#         min_index = afs['outerBoundEdgeLoop'][0]['pointFeature']['centroidDisp'].index(minCentroidDisp)
+#         min_xyz = [afs['outerBoundEdgeLoop'][0]['pointFeature']['xyz'][min_index]]
+#
+#         maxCentroidDisp = max(afs['outerBoundEdgeLoop'][0]['pointFeature']['centroidDisp'])
+#         max_index = afs['outerBoundEdgeLoop'][0]['pointFeature']['centroidDisp'].index(maxCentroidDisp)
+#         max_xyz = [afs['outerBoundEdgeLoop'][0]['pointFeature']['xyz'][max_index]]
+#
+#         # what happens with multiple representations of the same minima/maxima??
+#         for obel_index in range(1, len(afs['outerBoundEdgeLoop'])):
+#             obel = afs['outerBoundEdgeLoop'][obel_index]
+#             if min(obel['pointFeature']['centroidDisp']) <= minCentroidDisp:
+#                 minCentroidDisp = min(obel['pointFeature']['centroidDisp'])
+#                 min_index = obel['pointFeature']['centroidDisp'].index(minCentroidDisp)
+#                 min_xyz = [obel['pointFeature']['xyz'][min_index]]
+#             elif (max(obel['pointFeature']['centroidDisp']) <= (minCentroidDisp + eps)) and max(obel['pointFeature']['centroidDisp']) >= (minCentroidDisp - eps):
+#                 min_index = obel['pointFeature']['centroidDisp'].index(minCentroidDisp)
+#                 if not array3x1match(obel['pointFeature']['xyz'][min_index], min_xyz):
+#                     min_xyz.append(obel['pointFeature']['xyz'][min_index])
+#
+#             if max(obel['pointFeature']['centroidDisp']) > maxCentroidDisp + eps:
+#                 maxCentroidDisp = max(obel['pointFeature']['centroidDisp'])
+#                 max_index = obel['pointFeature']['centroidDisp'].index(maxCentroidDisp)
+#                 max_xyz = [obel['pointFeature']['xyz'][max_index]]
+#             elif (max(obel['pointFeature']['centroidDisp']) <= (maxCentroidDisp + eps)) and max(obel['pointFeature']['centroidDisp']) >= (maxCentroidDisp - eps):
+#                 max_index = obel['pointFeature']['centroidDisp'].index(maxCentroidDisp)
+#                 if not array3x1match(obel['pointFeature']['xyz'][max_index], max_xyz):
+#                     max_xyz.append(obel['pointFeature']['xyz'][max_index])
+#
+#         afs['globalExtrema'] = {'xyz':[], 'centroidDisp':[], 'maxima':[], 'minima':[]}
+#
+#         for mxyz in max_xyz:
+#             afs['globalExtrema']['xyz'].append(mxyz)
+#             afs['globalExtrema']['centroidDisp'].append(maxCentroidDisp)
+#             afs['globalExtrema']['maxima'].append(True)
+#             afs['globalExtrema']['minima'].append(False)
+#
+#         for mxyz in min_xyz:
+#             afs['globalExtrema']['xyz'].append(mxyz)
+#             afs['globalExtrema']['centroidDisp'].append(minCentroidDisp)
+#             afs['globalExtrema']['maxima'].append(False)
+#             afs['globalExtrema']['minima'].append(True)
+
+
 def getOFFpointsfaces(OFFdata):
     #     parsing data from OFF (Object File Format) string, which store 3D model data.
     #     See `wikipedia <https://en.wikipedia.org/wiki/OFF_(file_format)>`_
     #     for the file format specification.
+
     OFFdata = OFFdata.splitlines()
 
     if OFFdata[0] != 'OFF':
@@ -5347,6 +5487,14 @@ def getOFFpointsfaces(OFFdata):
     return OFF_points, OFF_faces
 
 
+def getNextRef():
+    """return the next free #ref value"""
+    global maxRefValue
+
+    maxRefValue += 1
+    return '#' + str(maxRefValue-1)
+
+
 def OFFsegmentParse(localCentroid, ParsedEdge):
 
     v1 = ParsedEdge['vertex1']
@@ -5366,10 +5514,251 @@ def OFFsegmentParse(localCentroid, ParsedEdge):
         u = np.linalg.norm(minPoint - ParsedEdge['vertex1']) / np.linalg.norm(
             ParsedEdge['vertex2'] - ParsedEdge['vertex1'])
         ParsedEdge['pointFeature']['u'].insert(1, u)
+        # xxx ParsedEdge['pointFeature']['ref'].insert(1, getNextRef())
 
+
+# def parseOFFpointsfaces_1(OFF_points, OFF_faces):
+#
+#     def commonIndex(L1, id1, L2, id2):
+#         subset1 = [i for i, v in enumerate(L1) if v == id1]
+#         subset2 = [i for i, v in enumerate(L2) if v == id2]
+#         return(list(set(subset1) & set(subset2)))
+#
+#     parsedOFFsurfaces = []
+#     parsedOFFedges = []
+#     offsetRef = len(OFF_points) + len(OFF_faces)
+#
+#     # OFF convex hull points is simply points set
+#     #outermostPoints = [np.array(c) for c in OFF_entities['points']]
+#     centroid = medianPoint(OFF_points)
+#
+#     # should probably be global
+#     # for speed of generation checking, organise vertices in lists - use this to subsequently create nearby values?
+#     v1series = []
+#     v2series = []
+#     edgeSeries = []
+#     edgeLocale = {}
+#
+#     for offi, offf in enumerate(OFF_faces):
+#     #for offi in range(0, (OFF_faces)):
+#         SurfaceClass = {
+#             'SurfaceNormalOutwards': False,
+#             'SurfaceTypeName': 'PLANE',
+#             'SurfaceRef': '#'+str(offi + len(OFF_points)), # get index, check OBOE
+#             'SurfaceParams': None,
+#             'EdgeLoopList': [],
+#             'outerBoundEdgeLoop': [],
+#             'ParsedSurface': {},
+#             'globalExtrema': {}
+#         }
+#
+#         vertices = []
+#         # assume referenced points are issued in clockwise order (test?)
+#         # create edges from listed vertices
+#
+#         # normals point toward the side from which the vertices appear in counterclockwise order,
+#         # vertices are generated in clockwise order
+#
+#         for vi in range(0, len(offf)):
+#
+#             parsedEdgeRef = False
+#             if ('#'+str(offf[vi]) in v1series):
+#                 if vi < len(offf)-1:
+#                     if '#'+str(offf[vi+1]) in v2series:
+#                         parsedEdgeRef +=1
+#                 else:  # vi == len(offf)
+#                     if '#' + str(offf[0]) in v2series:
+#                         parsedEdgeRef += 1
+#
+#             if '#' + str(offf[vi]) in v2series:
+#                 if vi < len(offf)-1:
+#                     if '#' + str(offf[vi + 1]) in v1series:
+#                         parsedEdgeRef += 1
+#                 else:  # vi == len(offf)
+#                     if '#' + str(offf[0]) in v1series:
+#                         parsedEdgeRef += 1
+#
+#             #     if '#'+str(offf[vi+1]) in v1series:# and not '#'+str(offf[-1]) in v2series:
+#             #         if '#'+str(offf[vi]) in v2series:
+#             #             #commonIndex(v1series, '#'+str(offf[vi + 1]), v2series, '#'+str(offf[-1]))
+#             #             parsedEdgeRef +=1
+#             #
+#             # else: #vi == len(offf)
+#             #
+#             # if ('#'+str(offf[vi]) in v1series):
+#             #     if '#'+str(offf[0]) in v2series:
+#             #         parsedEdgeRef +=1
+#             #
+#             # if '#'+str(offf[-1]) in v2series:
+#             #     if '#'+str(offf[0]) in v1series:
+#             #         parsedEdgeRef += 1
+#
+#             if parsedEdgeRef:
+#                 if vi == len(offf)-1:
+#                     if ('#'+str(offf[0]) in v1series) or ('#'+str(offf[-1]) in v1series):
+#                         if ('#'+str(offf[0]) in v2series) or ('#'+str(offf[-1]) in v2series):
+#                             v1set = [i for i, v in enumerate(v1series) if (v == '#' + str(offf[0])) or (v == '#' + str(offf[-1]))]
+#                             v2set = [i for i, v in enumerate(v2series) if (v == '#' + str(offf[0])) or  (v == '#' + str(offf[-1]))]
+#                             # v1v2index = (set(v1set) & set(v2set))
+#                             # parsedEdgeRef = edgeSeries[v1v2index[0]]
+#
+#                 else:
+#                     v1set = [i for i, v in enumerate(v1series) if (v == '#'+str(offf[vi])) or (v == '#'+str(offf[vi+1]))]
+#                     v2set = [i for i, v in enumerate(v2series) if (v == '#'+str(offf[vi])) or (v == '#'+str(offf[vi+1]))]
+#                 # should only be one unique value
+#                 v1v2index = list(set(v1set) & set(v2set))
+#                 if len(v1v2index) == 1:
+#                     parsedEdgeRef = edgeSeries[v1v2index[0]]
+#                 elif len(v1v2index) < 1:
+#                     parsedEdgeRef = 0
+#                 else:
+#                     print("OFF structure failure somewhere")
+#
+#             ParsedEdge = {
+#                 'vertex1': np.array(OFF_points[offf[vi]]),
+#                 'vertex1ref': '#' + str(offf[vi])
+#             }
+#             v1series.append('#' + str(offf[vi]))
+#             if vi == len(offf) - 1:
+#                 ParsedEdge['vertex2'] = np.array(OFF_points[offf[0]])
+#                 ParsedEdge['vertex2ref'] = '#'+str(offf[0])
+#                 v2series.append('#'+str(offf[0]))
+#             else:
+#                 ParsedEdge['vertex2'] = np.array(OFF_points[offf[vi+1]])
+#                 ParsedEdge['vertex2ref'] = '#'+str(offf[vi+1])
+#                 v2series.append('#'+str(offf[vi+1]))
+#
+#             if not parsedEdgeRef:
+#                 parsedEdgeRef = '#'+str(len(parsedOFFedges) + offsetRef)
+#                 edgeLocale[parsedEdgeRef] = [(offi, vi)]
+#             else:
+#                 edgeLocale[parsedEdgeRef].append((offi, vi))
+#
+#             ParsedEdge['edgeRef'] = parsedEdgeRef
+#             edgeSeries.append(parsedEdgeRef)
+#
+#             ParsedEdge['VOR'] = False
+#             ParsedEdge['typeName'] = 'LINE'
+#             ParsedEdge['edgeParams'] = ''
+#             ParsedEdge['pointFeature'] = {}
+#
+#             OFFsegmentParse(centroid, ParsedEdge)
+#             parsedOFFedges.append(ParsedEdge)
+#             #edgeLocale[ParsedEdge['edgeRef']] = [(offi, vi)]
+#             vertices.append(ParsedEdge['vertex1'])
+#
+#             SurfaceClass['EdgeLoopList'].append(parsedEdgeRef)
+#             SurfaceClass['outerBoundEdgeLoop'].append(ParsedEdge)
+#
+#             # normals point toward the side from which the vertices appear in counterclockwise order,
+#             # vertices are generated in clockwise order
+#
+#         # if len(vertices) < 3:
+#         #     _1=1
+#
+#
+#         axisPoint = vertices[0] # medianPoint(vertices)
+#         #normDir = np.cross(vertices[0] - axisPoint, vertices[1] - axisPoint)
+#         normDir = np.cross(vertices[2] - vertices[0], vertices[1] - vertices[0])
+#         if np.linalg.norm(normDir) < eps:
+#             normDir = np.cross(vertices[2] - vertices[1], vertices[0] - vertices[1])
+#             #_1=1
+#         else:
+#             normDir = normDir / np.linalg.norm(normDir)
+#         refDir = vertices[0] - vertices[1]
+#         if np.linalg.norm(refDir)  < eps:
+#             refDir = vertices[1] - vertices[2]
+#         else:
+#             #_1=1
+#             refDir = refDir/np.linalg.norm(refDir)
+#         SurfaceClass['ParsedSurface']['axisPoint'] = axisPoint
+#         SurfaceClass['ParsedSurface']['normDir'] = normDir
+#         SurfaceClass['ParsedSurface']['refDir'] = refDir
+#         SurfaceClass['ParsedSurface']['pointFeature'] = {}
+#         SurfaceClass['ParsedSurface']['pointFeature']['xyz'] = []
+#         SurfaceClass['ParsedSurface']['pointFeature']['centroidDisp'] = []
+#         SurfaceClass['ParsedSurface']['pointFeature']['maxima'] = []
+#         SurfaceClass['ParsedSurface']['pointFeature']['minima'] = []
+#
+#         SurfaceClass['globalExtrema']['xyz'] = []
+#         SurfaceClass['globalExtrema']['centroidDisp'] = []
+#         SurfaceClass['globalExtrema']['maxima'] = []
+#         SurfaceClass['globalExtrema']['minima'] = []
+#
+#         parsedOFFsurfaces.append(SurfaceClass)
+#
+#     # adjacent vertices/edges can be found from  v1series, v2series
+#
+#     # get surfaces adjacent to every vertex (root surface entry)
+#     VSset = {}
+#     for v in range(0, len(OFF_points)):
+#         VinS = []
+#         for offf_index, offf in enumerate(OFF_faces):
+#             if v in offf:
+#                 VinS.append(offf_index)
+#         if len(VinS) > 0: # why would a vertex not be attached to a surface?
+#             VSset['#'+str(v)] = VinS
+#     for s in range(0, len(OFF_faces)):
+#         VAS = {}
+#         for v in OFF_faces[s]:
+#             VAS['#'+str(v)] = VSset['#'+str(v)]
+#         parsedOFFsurfaces[s]['vertexAdjSurfaces'] = VAS
+#
+#     # get edges adjacent to every vertex
+#     # # find all vertices associated with a vertex
+#     # adjVertexVertices = {}
+#     # for vs in range(0, len(OFF_points)):
+#     #     adjVertexVertices['#' + str(vs)] = [v2series[v1s_i] for v1s_i, v1s in enumerate(v1series) if v1s == '#' + str(vs)] + [v1series[v2s_i] for v2s_i, v2s in enumerate(v2series) if v2s == '#' + str(vs)]
+#
+#     # find all edges associated with a vertex ----------------------------------todo IS THIS EXHAUSTIVE???
+#     adjEdgeVertices = {}
+#     for vs in range(0, len(OFF_points)):
+#
+#         # if vs == 7:
+#         #     _1=1
+#
+#         adjEdgeVertices['#' + str(vs)] = ([edgeSeries[v1s_i] for v1s_i, v1s in enumerate(v1series) if (v1s == '#' + str(vs))] +
+#                                             [edgeSeries[v2s_i] for v2s_i, v2s in enumerate(v2series) if (v2s == '#' + str(vs))])
+#         adjEdgeVertices['#' + str(vs)] = list(set(adjEdgeVertices['#' + str(vs)]))
+#
+#
+#     # for v in range(0, len(OFF_points)):
+#     #     v1set = [v1s for v1s in v1series if v1s=='#'+str(v)]
+#     #     v2set = [v2s for v2s in v2series if v2s=='#'+str(v)]
+#     #     [edgeSeries[v1s] for v1s in v1set] + [edgeSeries[v2s] for v2s in v2set]
+#
+#     for s in parsedOFFsurfaces:
+#         for v in s['outerBoundEdgeLoop']:
+#             # {v1r: edgeLocale[v1r] for v1r in adjEdgeVertices[v['vertex1ref']]}
+#             v['vertex1_surroundIndex'] = {v1r: edgeLocale[v1r][0] for v1r in adjEdgeVertices[v['vertex1ref']]}
+#             v['vertex2_surroundIndex'] = {v2r: edgeLocale[v2r][0] for v2r in adjEdgeVertices[v['vertex2ref']]}
+#
+#             # if v['vertex1ref']=='#7':
+#             #     _1=1
+#
+#
+#     # se[sRef + '_surroundIndex'][ref2] = (afs2_index, te_index)
+#     #     for afs_index, afs in enumerate(AFSobj):
+#     #         for se_index, se in enumerate(afs['outerBoundEdgeLoop']):
+#     #             for sRef in ['vertex1ref', 'vertex2ref']:
+#     #                 if se.get(sRef):
+#     #                     ref1 = se[sRef]
+#     #                     indexDictName = sRef + '_surroundIndex'
+#     #[v1s_i, v1s in enumerate(v1series) if v1s in ]
+#
+#     # v2series = []
+#     # edgeSeries = []
+#
+#     #  # get adjacent surfaces to edge
+#     # se['edge_surroundIndex'][se['edgeRef']].append(afs2_index)
+#
+#
+#     return parsedOFFsurfaces
 
 
 def parseOFFpointsfaces(OFF_points, OFF_faces):
+
+    global maxRefValue
     parsedOFFsurfaces = []
     parsedOFFedges = []
     offsetRef = len(OFF_points) + len(OFF_faces)
@@ -5399,7 +5788,7 @@ def parseOFFpointsfaces(OFF_points, OFF_faces):
         for vi in range(0, len(offf)):
 
             parsedEdgeRef = None
-            for vv in parsedOFFedges: # this is an inefficient search method
+            for vv in parsedOFFedges: # todo this is an inefficient search method, k-d tree?
                 if (vv['vertex1ref'] == '#'+str(offf[vi])) and not (vv['vertex1ref'] == '#'+str(offf[-1])):
                     if (vv['vertex2ref'] == '#'+str(offf[vi+1])):
                         parsedEdgeRef = vv['edgeRef']
@@ -5446,8 +5835,8 @@ def parseOFFpointsfaces(OFF_points, OFF_faces):
             # normals point toward the side from which the vertices appear in counterclockwise order,
             # vertices are generated in clockwise order
 
-        if len(vertices) < 3:
-            _1=1
+        # if len(vertices) < 3:
+        #     _1=1
 
 
         axisPoint = vertices[0] # medianPoint(vertices)
@@ -5472,106 +5861,28 @@ def parseOFFpointsfaces(OFF_points, OFF_faces):
         SurfaceClass['ParsedSurface']['pointFeature']['minima'] = []
 
         parsedOFFsurfaces.append(SurfaceClass)
+
+    maxRefValue = offi + len(OFF_points)
     return parsedOFFsurfaces
 
 
-
-
-
-
-
-testDir = os.path.normpath(r"/media/foobert/Dell2HDD/STEP_test_files")
-#primitivesDir = os.path.normpath(testDir + r"primitives")
-
-#filepath = "primitives/Cube/unit_cube_inc8.0_blend.06.stp"
-# filepath = "primitives/Cube/Cylinder/unit_cyl.stp"
-# filepath = "primitives/Cube/Primitive_Cone-PartCone.step"
-
-#filepath = testDir + "RR_STEP_test_1A.step" # pass.. I think, no representation available
-#filepath = testDir + "RR_STEP_test_N.step" # fail, no trimmed_curve circle code================
-# filepath = testDir + "00000001_1ffb81a71e5b402e966b9341_step_000.step"
-# filepath = testDir + "00000010_b4b99d35e04b4277931f9a9c_step_000.step"
-#filepath = "LEA-M8F(AP203).STEP" # too large to debug?
-
-#filepath = testDir + "9341_step_000.step" #FAIL - reverse list from spline=======================
-#filepath = testDir + "revolve_spline.step" #PASS
-
-# filepath = testDir + "/simpleSpindle1.step" #PASS
-# filepath = testDir + "Maltese_cruciform.step" #PASS
-#filepath = "TiltedConeAP203.step" # pass
-#filepath = "OffsetCone_AP214_noPlacement_noParametric.step"
-#filepath = "OffsetCone-PartCone.step" #PASS2
-#filepath = "TiltedCylinder4_AP214_PC.step" #PASS2
-#filepath = "TiltedCylinder5-AP214_draft.step" #PASS2
-#filepath = "TiltedCylinder4c-AP203-ESOP.step" #PASS2
-#filepath = "Cylinder5_AP214_PC.step" #PASS2
-#filepath = "DrexelBlendedCylinder_topOvalPlane.step" #PASS2
-#filepath = "DrexelBlendedCylinder_curvedBlend.step" #PASS2
-#filepath = "DrexelBlendedCylinder_midriffTube.step" #PASS2 - note disparity between ellipse minima and vertexes
-
-# can a minima exist on an NURB surface edge? test all local NURB boundary minima against centroid disp??
-
-#filepath = "TiltedCylinder2.step" #PASS2
-#filepath = "TiltedCylinder3.step" #PASS2
-#filepath = "primitives/Cube/unit_cube.stp" # pass2
-#filepath = "Drexel_blended_ellipse_plain.step" # fail, no surfaces ellipse
-filepath = "Drexel_blended_cylinder.step" # pass2
-#filepath = "DrexelBlendedCylinder_curvedBlend.step" # pass2
-#filepath = "TiltedCylinder.step" # pass2
-#filepath = "Synth_ellipse_plain.step" # pass (no Advanced Face Surface)
-
-#filepath = primitivesDir + os.sep + "Cube/unit_cube.stp" #PASS2
-# OFF format
-#filepath = "bed_0001.off"
-#filepath = "testOFF.off"
-#filepath = "primitives/Cube/unit_cube.stp"
-
-try:
-    # filepath check
-    checkPath = glob.glob(testDir + os.sep + filepath)
-    if len(checkPath) != 1:
-        raise Exception("pathname failure")
-    else:
-        print("STEPaffineFeatures test: ", filepath)
-        with open(testDir + os.sep + filepath) as f:
-            fileData = f.read()
-except:
-    print("check media is mounted")
-    raise Exception("file failure")
-
-if filepath.split(".",1)[1] in ["step", "stp"]:
-    # FORMAT stepcode.Part21 objects INTO USEFUL LOCAL DATA STRUCTURES WHERE INTERRELATIONSHIPS ARE RECORDED
-    STEPobj = parseSTEPstr(fileData)
-    AdvancedFaceSurfaces = parseStepcodePart21object()
-    # get all points of model for initial median centroid
-    outermostPoints = getConvexHullPointSetSTEP(STEPobj)
-    centroid = medianPoint(outermostPoints)
-    # if not OFF?
-    calculateEdgeMaxMin(AdvancedFaceSurfaces)
-
-elif filepath.split(".",1)[1] in ["OFF", "off"]:
-    OFF_points, OFF_faces = getOFFpointsfaces(fileData)
-    AdvancedFaceSurfaces = parseOFFpointsfaces(OFF_points, OFF_faces)
-    # OFF convex hull points is simply points set
-    outermostPoints = [np.array(c) for c in OFF_points]
-    centroid = medianPoint(outermostPoints)
-
-else:
-    print(" unknown file identifier")
-    exit(-1)
-
-
-centroid = medianPoint(outermostPoints)
-# continue to ignore local maxima at both radial extents and NURB surface maxima?
-
+# ============================================================ common functions
 def centroidIterate(AFSobj, centroid, verbose=False):
     # iteratively calculate max/min points and median centroid point
     # extract max values for all surfaces to add to median vertex calculation for centroid
-    # (should work with OFF)
-    #lastCentroid2 = centroid # twin attractor issue------------------------------------------------------------------
+    # i.e. centroid is defined as median of convex-hull rather than mean of barycentric points
+
+    # will need to extract maxima from spheres or NURBS where surface maxima > edge/vertex maxima-----------------------------------------------------------------
+
     lastCentroid = centroid
     centroid = medianOfFeaturePoints(AFSobj)
     if len(centroid) == 3:
+        if (np.linalg.norm(lastCentroid - centroid) <= eps): # do not skip
+            for afs in AFSobj:
+                for edge in afs['outerBoundEdgeLoop']:
+                    edgeParse(centroid, edge, calcExtrema=True)
+                #surfaceParse(afs, centroid, calcExtrema=True)
+
         # iterate centroid-features relationship
         while (np.linalg.norm(lastCentroid - centroid) > eps): # and (np.linalg.norm(lastCentroid2 - centroid) > eps):
             # recalculate surfaces & edges max/min points according to new centroid
@@ -5602,22 +5913,6 @@ def centroidIterate(AFSobj, centroid, verbose=False):
     return centroid
 
 
-# iteratively calculate max/min points and median centroid point
-# extract max values for all surfaces to add to median vertex calculation for centroid
-centroid = centroidIterate(AdvancedFaceSurfaces, centroid, verbose=True)
-
-
-# expensive surface minima calculations after centroid is settled
-for afs in AdvancedFaceSurfaces:
-    surfaceParse(afs, centroid, calcExtrema=True)
-
-
-# todo: search for all edges & surfaces related to point features (maybe symmetrical arcs too) get nearest points
-# to originating points
-# note that one can expect C2 continuity in STEP format, meaning that two point maxima will not be adjacent except
-# where the surface or edge is of a fixed radius from the local centroid.
-
-
 def parseAdjacentFeatures(AFSobj):  # getNearestFeatures(sourceRef, parsedFaceSet):
     """ given a STEP reference associated with a feature, find all associated objects (edges & surfaces) and return  """
     # seems there should be sets of associated references with every adjacent feature??
@@ -5627,6 +5922,8 @@ def parseAdjacentFeatures(AFSobj):  # getNearestFeatures(sourceRef, parsedFaceSe
     # max/min @ vertex: return edges w/ second vertex for all edge set, surfaces that touch vertex
     # max/min @ edge: return vertex1 & 2 plus touching surfaces
     # max/min @ surface: return surface & its edges & vertices
+
+    # v slow for OFF files, use balltree or k-d search?
 
     # get surfaces adjacent to every vertex
     for afs_index, afs in enumerate(AFSobj):
@@ -5642,8 +5939,7 @@ def parseAdjacentFeatures(AFSobj):  # getNearestFeatures(sourceRef, parsedFaceSe
                                 if afs2_index not in afs['vertexAdjSurfaces'][se[sRef]]:
                                     afs['vertexAdjSurfaces'][se[sRef]].append(afs2_index)
 
-
-    # get edges adjacent to every vertex
+    # get edges adjacent to every vertex # todo does not work for OFF
     for afs_index, afs in enumerate(AFSobj):
         for se_index, se in enumerate(afs['outerBoundEdgeLoop']):
             for sRef in ['vertex1ref', 'vertex2ref']:
@@ -5651,18 +5947,16 @@ def parseAdjacentFeatures(AFSobj):  # getNearestFeatures(sourceRef, parsedFaceSe
                     ref1 = se[sRef]
                     indexDictName = sRef + '_surroundIndex'
                     se[indexDictName] = {}
-                    # se[indexDictName][ref1] = (afs_index, se_index)================================================================
                     for afs2_index, afs2 in enumerate(AFSobj):
                         for te_index, te in enumerate(afs2['outerBoundEdgeLoop']):
                             te_strings = [et for et in te.values() if type(et) == str]
                             if ref1 in te_strings:  #
                                 # add adjacent surfaces unnecessary as these are the first field of feature mapping
-                                # for tRef in ['vertex1ref', 'vertex2ref']:#, 'edgeRef']:
-                                for tRef in ['edgeRef']:
-                                    if te.get(tRef):
-                                        ref2 = te[tRef]
-                                        if (ref2 != ref1):  # and ref2 not in edgeSource[indexDictName].keys():
-                                            se[indexDictName][ref2] = (afs2_index, te_index)
+                                if te.get('edgeRef'):
+                                    ref2 = te['edgeRef']
+                                    if (ref2 != ref1):  # and ref2 not in edgeSource[indexDictName].keys():
+                                        se[indexDictName][ref2] = (afs2_index, te_index)
+                                        # this only stores the last instance
 
     # get adjacent surfaces to edge
     for afs_index, afs in enumerate(AFSobj):
@@ -5740,6 +6034,9 @@ def getRotSymFeatures(AFSobj):
 
     # f = open('AFS_cruciform.pkl','rb')
     # AFSobj = pickle.load(f)
+
+    # Note that rotSymFeatures returns fields consistent with rotationally symmetrical objects along consistent axes.
+    # Relative maxima/minima would be lost if rotational features divided between individual surface
 
     allRotSymFeatures = dict()
     allRotSymFeatures['rotSymCentre'] = []
@@ -5865,14 +6162,702 @@ def getRotSymFeatures(AFSobj):
     return superAxesSet
 
 
-# for every local minima or maxima feature point, find the surrounding local minima points by way of geometrical features
-# (i.e. opposing minima on a thin plate don't count; adjacency is not calculated by cartesian distance but surface topography)
+# alternative notion: simply store the minimum value of every surface?
 
-# create similar dict structure listing local minima/maxima tuple (index1, index2) key and index list of surrounding local maxima/minima
-# ignore overall minima within a surface and edge boundaries
 
-# surface maxima/minima may be associated with related edge maxima/minima (note B-spline surface may have several max/min)
-# find the minima/maxima associated with every edge
+# def getPointFeatures(AFSobj):
+#     '''
+#     order point features to return unique points and characteristics
+#     '''
+#
+#     # def vertexExtremaSearch(AFSobj, extremaType='maxima'):
+#     #     # this is better adapted to NURBS edges, slow for OFF
+#     #
+#     #     pointFeatures = dict()
+#     #     pointFeatures['xyz'] = []
+#     #     pointFeatures['centroidDisp'] = []
+#     #     pointFeatures['maxima'] = []
+#     #     pointFeatures['minima'] = []
+#     #     pointFeatures['featureRef'] = []
+#     #     pointFeatures['vertexRef'] = []
+#     #
+#     #     vertexX = ['vertex1', 'vertex2']
+#     #     vertexXref = ['vertex1ref', 'vertex2ref']
+#     #
+#     #     # flag = 0
+#     #     # oldflag = 0
+#     #
+#     #     vertexXref_surroundIndex = ['vertex1ref_surroundIndex', 'vertex2ref_surroundIndex']
+#     #
+#     #     extrema = dict()
+#     #     for v in [0, 1]:  #range(0, 2):  # vertex1, vertex2
+#     #         for afs_index, afs in enumerate(AFSobj):
+#     #             for edge in afs['outerBoundEdgeLoop']:
+#     #
+#     #                 # if edge['vertex1ref'] == '#7' or  edge['vertex2ref'] == '#7':
+#     #                 #     _1 = 1
+#     #
+#     #                 #print(edge['edgeRef'])  # ====================================================================
+#     #
+#     #                 # if (edge.get('superTypeNameFlag') is not None):
+#     #                 #     if edge['superTypeName'] == 'SEAM_CURVE':  # exclude SEAM_CURVE data
+#     #                 #         print("is this code reachable??")
+#     #                 #         break
+#     #                 #         # unnecessary?
+#     #
+#     #                 # elif not edge.get('pointFeature'):
+#     #                 #     # commence with searching local minima around edges associated with AFS surface
+#     #                 #     # for each edge, get 'pointFeatures' fields
+#     #                 #     print("missing pointFeature field")  # this should be checked elsewhere
+#     #                 #     break
+#     #
+#     #                 if ((v == 0) and (edge[vertexXref[v]] not in extrema.keys())) or ((v == 1) and (edge[vertexXref[v]] not in extrema.keys())):
+#     #                     # get local extrema (maxima & minima) for all vertex and attached edges,
+#     #                     # retain extrema value in separate set, [surface]['outerBoundEdgeLoop'][edge]['pointFeature'][index]
+#     #
+#     #                     # for each pointFeature element, get max/min
+#     #                     # for vertex1/2 find if relative max/min from adjacent pointFeature element - ignore surfaces for now
+#     #
+#     #                     # u == 0, vertex1, get attached pointFeature
+#     #                     # surroundIndex should give address of adjacent edges
+#     #                     pfSurround = []
+#     #                     pfSurroundRef = []
+#     #                     adjacentEdgeRefs = []
+#     #                     reversedOrder = []
+#     #
+#     #                     for vseRef in edge[vertexXref_surroundIndex[v]].keys():
+#     #
+#     #                         adjacentEdgeRefs.append(vseRef)
+#     #                         vse = edge[vertexXref_surroundIndex[v]][vseRef] #todo: dict values (surface/edge address may be superfluous)
+#     #
+#     #                         # # print('=========================')
+#     #                         # print(AFSobj[vse[0]]['outerBoundEdgeLoop'][vse[1]]['vertex1'])
+#     #                         # print(edge['vertex1'])
+#     #                         # np.isclose(AFSobj[vse[0]]['outerBoundEdgeLoop'][vse[1]]['vertex1'], edge['vertex1']).all()
+#     #                         # print('=========================')
+#     #
+#     #                         # if not np.isclose(AFSobj[vse[0]]['outerBoundEdgeLoop'][vse[1]][vertexX[v]], edge[vertexX[v]]).all():
+#     #                         #     print('ALERT')
+#     #
+#     #                         adjPF = AFSobj[vse[0]]['outerBoundEdgeLoop'][vse[1]]['pointFeature']
+#     #                         if v==0:
+#     #                             if edge[vertexXref[0]] == AFSobj[vse[0]]['outerBoundEdgeLoop'][vse[1]][vertexXref[0]]:
+#     #                                 pfSurround.append(adjPF)
+#     #                                 reversedOrder.append(False)
+#     #                             else:
+#     #                                 reversePF = dict()
+#     #                                 reversePF['u'] = adjPF['u'].copy()
+#     #                                 reversePF['u'].reverse()
+#     #                                 reversePF['xyz'] = adjPF['xyz'].copy()
+#     #                                 # if not isinstance(reversePF['xyz'], list):
+#     #                                 #     _1=1
+#     #                                 reversePF['xyz'].reverse()
+#     #                                 reversePF['centroidDisp'] = adjPF['centroidDisp'].copy()
+#     #                                 reversePF['centroidDisp'].reverse()
+#     #                                 pfSurround.append(reversePF)
+#     #                                 reversedOrder.append(True)
+#     #                                 # print('=======RRRRRR')
+#     #                                 # print(reversePF['xyz'][0])
+#     #
+#     #                         elif v==1:
+#     #                             if edge[vertexXref[1]] == AFSobj[vse[0]]['outerBoundEdgeLoop'][vse[1]][vertexXref[1]]:
+#     #                                 reversePF = dict()
+#     #                                 reversePF['u'] = adjPF['u'].copy()
+#     #                                 reversePF['u'].reverse()
+#     #                                 reversePF['xyz'] = adjPF['xyz'].copy()
+#     #                                 # if not isinstance(reversePF['xyz'], list):
+#     #                                 #     _1=1
+#     #                                 reversePF['xyz'].reverse()
+#     #                                 reversePF['centroidDisp'] = adjPF['centroidDisp'].copy()
+#     #                                 reversePF['centroidDisp'].reverse()
+#     #                                 pfSurround.append(reversePF)
+#     #                                 reversedOrder.append(True)
+#     #                             else:
+#     #                                 pfSurround.append(adjPF)
+#     #                                 reversedOrder.append(False)
+#     #
+#     #                             #print('=======RRRRRR')
+#     #                             #print(reversePF['xyz'][0])
+#     #                         pfSurroundRef.append(AFSobj[vse[0]]['outerBoundEdgeLoop'][vse[1]]['edge_surroundIndex'])
+#     #                         #pfSurroundRef.append(AFSobj[vse[0]]['outerBoundEdgeLoop'][vse[1]]['edgeRef'])
+#     #
+#     #                     #pprint([pfs['xyz'][0] for pfs in pfSurround])
+#     #
+#     #                     # if not np.isclose(pfSurround[0]['centroidDisp'][0], [pfs['centroidDisp'][0] for pfs in pfSurround]).all():
+#     #                     #     flag-=1
+#     #                     # if not np.isclose(pfSurround[-1]['centroidDisp'][-1], [pfs['centroidDisp'][-1] for pfs in pfSurround]).all():
+#     #                     #     flag+=1
+#     #                     # if flag <= oldflag:
+#     #                     #     _1=1
+#     #                     # oldflag = flag
+#     #                     #
+#     #                     # if flag ==122:
+#     #                     #     pass
+#     #
+#     #                     # test vertexX with immediate neighbours
+#     #                     if extremaType == 'maxima':
+#     #                         #print([pfs['centroidDisp'][0] for pfs in pfSurround])
+#     #                         if all([pfs['centroidDisp'][0] > (pfs['centroidDisp'][1] + eps_STEP_AP21) for pfs in pfSurround]):
+#     #                             if not array3x1match(edge[vertexX[v]], pointFeatures['xyz']):
+#     #
+#     #                                 #B=[pfs['centroidDisp'][0] for pfs in pfSurround]
+#     #                                 #if np.isclose([pfs['centroidDisp'][0] for pfs in pfSurround]).all()
+#     #                                 # A = edge[vertexX[v]].tolist()
+#     #                                 # if np.abs(A[0] - 1.5) < eps and np.abs(A[1] - 4) < eps and np.abs(A[2]) < eps:
+#     #                                 #     _1 = 1
+#     #
+#     #                                 pointFeatures['xyz'].append(edge[vertexX[v]].tolist())
+#     #                                 pointFeatures['centroidDisp'].append(pfSurround[0]['centroidDisp'][0])
+#     #                                 pointFeatures['maxima'].append(True)
+#     #                                 pointFeatures['minima'].append(False)
+#     #                                 pointFeatures['featureRef'].append(edge[vertexX[v]+'ref_surroundIndex'])
+#     #                                 pointFeatures['vertexRef'].append(edge['vertex1ref'])
+#     #
+#     #                     elif extremaType == 'minima':
+#     #                         print([pfs['centroidDisp'][0] for pfs in pfSurround])
+#     #                         if all([pfs['centroidDisp'][0] < (pfs['centroidDisp'][1] - eps_STEP_AP21) for pfs in pfSurround]):  # local min
+#     #                             if not array3x1match(edge[vertexX[v]], pointFeatures['xyz']):
+#     #
+#     #
+#     #                                 # A = edge[vertexX[v]].tolist()
+#     #                                 # if np.abs(A[0] - 1.5) < eps and np.abs(A[1] - 4) < eps and np.abs(A[2]) < eps:
+#     #                                 #     _1 = 1
+#     #
+#     #                                 pointFeatures['xyz'].append(edge[vertexX[v]].tolist())
+#     #                                 pointFeatures['centroidDisp'].append(pfSurround[0]['centroidDisp'][0])
+#     #                                 pointFeatures['maxima'].append(False)
+#     #                                 pointFeatures['minima'].append(True)
+#     #                                 pointFeatures['featureRef'].append(edge[vertexX[v]+'ref_surroundIndex'])
+#     #                                 pointFeatures['vertexRef'].append(edge['vertex1ref'])
+#     #                                 #print('A')
+#     #                                 # BREAK ???
+#     #
+#     #                     # once the extrema is not at a vertex, but lies on an edge, each edge should be recorded independently
+#     #                     # pointFeatures['featureRef'].append(edge['edge_surroundIndex']) should differ for pfSurround edges
+#     #
+#     #                     # search through intermediate extrema between vertices - SHOULD THIS NOT BE IGNORED IF TESTED AS IMMEDIATE EXTREMA ABOVE?
+#     #                     maxPFlen = max([len(pfs['u']) for pfs in pfSurround]) - 1
+#     #                     if maxPFlen > 1:
+#     #                         crawlindex = 1
+#     #                         #print(type(crawlindex))
+#     #                         # if type(crawlindex) is not type(maxPFlen):
+#     #                         #     _1=1
+#     #                         while crawlindex < maxPFlen:
+#     #                             # should capture all local max/min before second vertex
+#     #                             for pfsIndex, pfs in enumerate(pfSurround):
+#     #                                 # if pfs.get('centroidDisp') is None:
+#     #                                 #     _1=1
+#     #
+#     #                                 # 'centroidDisp' find local maxima/minima
+#     #                                 if crawlindex < len( pfs['centroidDisp']) - 1:
+#     #                                     pfcd0 = pfs['centroidDisp'][crawlindex - 1]
+#     #                                     pfcd1 = pfs['centroidDisp'][crawlindex]
+#     #                                     pfcd2 = pfs['centroidDisp'][crawlindex + 1]
+#     #
+#     #                                     if reversedOrder[pfsIndex]:
+#     #                                         u = len(pfs['u']) - crawlindex - 1
+#     #                                     else:
+#     #                                         u = crawlindex
+#     #
+#     #                                     if extremaType == 'maxima':  # local max
+#     #
+#     #                                         # if np.abs(pfs['xyz'][crawlindex][0] - 1.5) < eps and np.abs(
+#     #                                         #         pfs['xyz'][crawlindex][1] - 4) < eps and np.abs(
+#     #                                         #         pfs['xyz'][crawlindex][2]) < eps:
+#     #                                         #     _1 = 1
+#     #
+#     #                                         if (pfcd1 > pfcd0 + eps_STEP_AP21) and (pfcd1 > pfcd2 + eps_STEP_AP21):
+#     #                                             if not array3x1match(pfs['xyz'][u], pointFeatures['xyz']):
+#     #                                                 pointFeatures['xyz'].append(pfs['xyz'][u])
+#     #                                                 pointFeatures['centroidDisp'].append(pfcd1)
+#     #                                                 pointFeatures['maxima'].append(True)
+#     #                                                 pointFeatures['minima'].append(False)
+#     #                                                 #pointFeatures['featureRef'].append(edge['edge_surroundIndex'])
+#     #                                                 pointFeatures['featureRef'].append(pfSurroundRef[pfsIndex])
+#     #                                                 # if (pfs['u'][u] > (1 - eps_STEP_AP21))
+#     #                                                 #     pointFeatures['ref'].append(edge['vertex1ref'])
+#     #                                                 pointFeatures['vertexRef'].append(None)
+#     #
+#     #                                     elif extremaType == 'minima':  # local min
+#     #
+#     #                                         if (pfcd1 < pfcd0 - eps_STEP_AP21) and (pfcd1 < pfcd2 - eps_STEP_AP21):
+#     #                                             if not array3x1match(pfs['xyz'][u], pointFeatures['xyz']):
+#     #                                                 pointFeatures['xyz'].append(pfs['xyz'][u])
+#     #                                                 pointFeatures['centroidDisp'].append(pfcd1)
+#     #                                                 pointFeatures['maxima'].append(False)
+#     #                                                 pointFeatures['minima'].append(True)
+#     #                                                 #pointFeatures['featureRef'].append(edge['edge_surroundIndex'])
+#     #                                                 pointFeatures['featureRef'].append(pfSurroundRef[pfsIndex])
+#     #                                                 pointFeatures['vertexRef'].append(None)
+#     #                                                 #print('B')
+#     #
+#     #                             crawlindex += 1
+#     #
+#     #             # print(AFSobj[afs_index]['SurfaceTypeName'])
+#     #             # print(AFSobj[afs_index]['SurfaceRef'])
+#     #
+#     #     return pointFeatures
+#
+#
+#     def vertexExtremaSearch(AFSobj):
+#         # this is better adapted to NURBS edges, slow for OFF
+#
+#         # flag = 0
+#         # oldflag = 0
+#
+#         pointFeatures = dict()
+#         pointFeatures['xyz'] = []
+#         pointFeatures['centroidDisp'] = []
+#         pointFeatures['maxima'] = []
+#         pointFeatures['minima'] = []
+#         pointFeatures['featureRef'] = []
+#         pointFeatures['vertexRef'] = []
+#
+#         vertexX = ['vertex1', 'vertex2']
+#         vertexXref = ['vertex1ref', 'vertex2ref']
+#         vertexXref_surroundIndex = ['vertex1ref_surroundIndex', 'vertex2ref_surroundIndex']
+#
+#         extrema = dict()
+#         for v in [0, 1]:  #range(0, 2):  # vertex1, vertex2
+#             for afs_index, afs in enumerate(AFSobj):
+#                 for edge in afs['outerBoundEdgeLoop']:
+#
+#                     #print(edge['edgeRef'])  # ====================================================================
+#
+#                     # if (edge.get('superTypeNameFlag') is not None):
+#                     #     if edge['superTypeName'] == 'SEAM_CURVE':  # exclude SEAM_CURVE data
+#                     #         print("is this code reachable??")
+#                     #         break
+#                     #         # unnecessary?
+#
+#                     # elif not edge.get('pointFeature'):
+#                     #     # commence with searching local minima around edges associated with AFS surface
+#                     #     # for each edge, get 'pointFeatures' fields
+#                     #     print("missing pointFeature field")  # this should be checked elsewhere
+#                     #     break
+#
+#                     if ((v == 0) and (edge[vertexXref[v]] not in extrema.keys())) or ((v == 1) and (edge[vertexXref[v]] not in extrema.keys())):
+#                         # get local extrema (maxima & minima) for all vertex and attached edges,
+#                         # retain extrema value in separate set, [surface]['outerBoundEdgeLoop'][edge]['pointFeature'][index]
+#
+#                         # for each pointFeature element, get max/min
+#                         # for vertex1/2 find if relative max/min from adjacent pointFeature element - ignore surfaces for now
+#
+#                         # u == 0, vertex1, get attached pointFeature
+#                         # surroundIndex should give address of adjacent edges
+#                         pfSurround = []
+#                         pfSurroundRef = []
+#                         adjacentEdgeRefs = []
+#                         reversedOrder = []
+#
+#                         for vseRef in edge[vertexXref_surroundIndex[v]].keys():
+#
+#                             adjacentEdgeRefs.append(vseRef)
+#                             vse = edge[vertexXref_surroundIndex[v]][vseRef] #todo: dict values (surface/edge address may be superfluous)
+#
+#                             # # print('=========================')
+#                             # print(AFSobj[vse[0]]['outerBoundEdgeLoop'][vse[1]]['vertex1'])
+#                             # print(edge['vertex1'])
+#                             # np.isclose(AFSobj[vse[0]]['outerBoundEdgeLoop'][vse[1]]['vertex1'], edge['vertex1']).all()
+#                             # print('=========================')
+#
+#                             # if not np.isclose(AFSobj[vse[0]]['outerBoundEdgeLoop'][vse[1]][vertexX[v]], edge[vertexX[v]]).all():
+#                             #     print('ALERT')
+#
+#                             adjPF = AFSobj[vse[0]]['outerBoundEdgeLoop'][vse[1]]['pointFeature']
+#                             if v==0:
+#                                 if edge[vertexXref[0]] == AFSobj[vse[0]]['outerBoundEdgeLoop'][vse[1]][vertexXref[0]]:
+#                                     pfSurround.append(adjPF)
+#                                     reversedOrder.append(False)
+#                                 else:
+#                                     reversePF = dict()
+#                                     reversePF['u'] = adjPF['u'].copy()
+#                                     reversePF['u'].reverse()
+#                                     reversePF['xyz'] = adjPF['xyz'].copy()
+#                                     # if not isinstance(reversePF['xyz'], list):
+#                                     #     _1=1
+#                                     reversePF['xyz'].reverse()
+#                                     reversePF['centroidDisp'] = adjPF['centroidDisp'].copy()
+#                                     reversePF['centroidDisp'].reverse()
+#                                     pfSurround.append(reversePF)
+#                                     reversedOrder.append(True)
+#                                     # print('=======RRRRRR')
+#                                     # print(reversePF['xyz'][0])
+#
+#                             elif v==1:
+#                                 if edge[vertexXref[1]] == AFSobj[vse[0]]['outerBoundEdgeLoop'][vse[1]][vertexXref[1]]:
+#                                     reversePF = dict()
+#                                     reversePF['u'] = adjPF['u'].copy()
+#                                     reversePF['u'].reverse()
+#                                     reversePF['xyz'] = adjPF['xyz'].copy()
+#                                     # if not isinstance(reversePF['xyz'], list):
+#                                     #     _1=1
+#                                     reversePF['xyz'].reverse()
+#                                     reversePF['centroidDisp'] = adjPF['centroidDisp'].copy()
+#                                     reversePF['centroidDisp'].reverse()
+#                                     pfSurround.append(reversePF)
+#                                     reversedOrder.append(True)
+#                                 else:
+#                                     pfSurround.append(adjPF)
+#                                     reversedOrder.append(False)
+#
+#                                 #print('=======RRRRRR')
+#                                 #print(reversePF['xyz'][0])
+#                             pfSurroundRef.append(AFSobj[vse[0]]['outerBoundEdgeLoop'][vse[1]]['edge_surroundIndex'])
+#                             #pfSurroundRef.append(AFSobj[vse[0]]['outerBoundEdgeLoop'][vse[1]]['edgeRef'])
+#
+#                         #pprint([pfs['xyz'][0] for pfs in pfSurround])
+#
+#                         # if not np.isclose(pfSurround[0]['centroidDisp'][0], [pfs['centroidDisp'][0] for pfs in pfSurround]).all():
+#                         #     flag-=1
+#                         # if not np.isclose(pfSurround[-1]['centroidDisp'][-1], [pfs['centroidDisp'][-1] for pfs in pfSurround]).all():
+#                         #     flag+=1
+#                         # if flag <= oldflag:
+#                         #     _1=1
+#                         # oldflag = flag
+#                         #
+#                         # if flag ==122:
+#                         #     pass
+#
+#                         # test vertexX with immediate neighbours
+#
+#                         # print([pfs['centroidDisp'][0] for pfs in pfSurround])
+#
+#                         # maxima calculation
+#                         if all([pfs['centroidDisp'][0] > (pfs['centroidDisp'][1] + eps_STEP_AP21) for pfs in pfSurround]):
+#                             if (edge[vertexXref[v]] in pointFeatures['vertexRef']):
+#                                 if pointFeatures['maxima'][pointFeatures['vertexRef'].index(edge[vertexXref[v]])]:
+#                                     pass
+#                             else:
+#                             #if not array3x1match(edge[vertexX[v]], pointFeatures['xyz']):
+#
+#                                 #B=[pfs['centroidDisp'][0] for pfs in pfSurround]
+#                                 #if np.isclose([pfs['centroidDisp'][0] for pfs in pfSurround]).all()
+#                                 # A = edge[vertexX[v]].tolist()
+#                                 # if np.abs(A[0] - 1.5) < eps and np.abs(A[1] - 4) < eps and np.abs(A[2]) < eps:
+#                                 #     _1 = 1
+#
+#                                 pprint(edge[vertexX[v]].tolist())
+#
+#                                 pointFeatures['xyz'].append(edge[vertexX[v]].tolist())
+#                                 pointFeatures['centroidDisp'].append(pfSurround[0]['centroidDisp'][0])
+#                                 pointFeatures['maxima'].append(True)
+#                                 pointFeatures['minima'].append(False)
+#                                 pointFeatures['featureRef'].append(edge[vertexX[v]+'ref_surroundIndex'])
+#                                 pointFeatures['vertexRef'].append(edge[vertexXref[v]])
+#
+#                         # minima calculation
+#                         if all([pfs['centroidDisp'][0] < (pfs['centroidDisp'][1] - eps_STEP_AP21) for pfs in pfSurround]):  # local min
+#                             if (edge[vertexXref[v]] in pointFeatures['vertexRef']):
+#                                 if pointFeatures['minima'][pointFeatures['vertexRef'].index(edge[vertexXref[v]])]:
+#                                     pass
+#                             else:
+#                             #if not array3x1match(edge[vertexX[v]], pointFeatures['xyz']):
+#
+#                                 # A = edge[vertexX[v]].tolist()
+#                                 # if np.abs(A[0] - 1.5) < eps and np.abs(A[1] - 4) < eps and np.abs(A[2]) < eps:
+#                                 #     _1 = 1
+#
+#                                 pprint(edge[vertexX[v]].tolist())
+#
+#                                 pointFeatures['xyz'].append(edge[vertexX[v]].tolist())
+#                                 pointFeatures['centroidDisp'].append(pfSurround[0]['centroidDisp'][0])
+#                                 pointFeatures['maxima'].append(False)
+#                                 pointFeatures['minima'].append(True)
+#                                 pointFeatures['featureRef'].append(edge[vertexX[v]+'ref_surroundIndex'])
+#                                 pointFeatures['vertexRef'].append(edge[vertexXref[v]])
+#
+#
+#                         # once the extrema is not at a vertex, but lies on an edge, each edge should be recorded independently
+#                         # pointFeatures['featureRef'].append(edge['edge_surroundIndex']) should differ for pfSurround edges
+#
+#                         # search through intermediate extrema between vertices - SHOULD THIS NOT BE IGNORED IF TESTED AS IMMEDIATE EXTREMA ABOVE?
+#                         maxPFlen = max([len(pfs['u']) for pfs in pfSurround]) - 1
+#                         if maxPFlen > 1:
+#                             crawlindex = 1
+#                             while crawlindex < maxPFlen:
+#                                 # should capture all local max/min before second vertex
+#                                 for pfsIndex, pfs in enumerate(pfSurround):
+#
+#                                     # 'centroidDisp' find local maxima/minima
+#                                     if crawlindex < len( pfs['centroidDisp']) - 1:
+#                                         pfcd0 = pfs['centroidDisp'][crawlindex - 1]
+#                                         pfcd1 = pfs['centroidDisp'][crawlindex]
+#                                         pfcd2 = pfs['centroidDisp'][crawlindex + 1]
+#
+#                                         if reversedOrder[pfsIndex]:
+#                                             u = len(pfs['u']) - crawlindex - 1
+#                                         else:
+#                                             u = crawlindex
+#
+#                                         # if np.abs(pfs['xyz'][crawlindex][0] - 1.5) < eps and np.abs(
+#                                         #         pfs['xyz'][crawlindex][1] - 4) < eps and np.abs(
+#                                         #         pfs['xyz'][crawlindex][2]) < eps:
+#                                         #     _1 = 1
+#
+#                                         # local maxima
+#                                         if (pfcd1 > pfcd0 + eps_STEP_AP21) and (pfcd1 > pfcd2 + eps_STEP_AP21):
+#                                             if not array3x1match(pfs['xyz'][u], pointFeatures['xyz']):
+#                                                 pointFeatures['xyz'].append(pfs['xyz'][u])
+#                                                 pointFeatures['centroidDisp'].append(pfcd1)
+#                                                 pointFeatures['maxima'].append(True)
+#                                                 pointFeatures['minima'].append(False)
+#                                                 #pointFeatures['featureRef'].append(edge['edge_surroundIndex'])
+#                                                 pointFeatures['featureRef'].append(pfSurroundRef[pfsIndex])
+#                                                 # if (pfs['u'][u] > (1 - eps_STEP_AP21))
+#                                                 #     pointFeatures['ref'].append(edge['vertex1ref'])
+#                                                 pointFeatures['vertexRef'].append(None)
+#
+#                                         # local minima
+#                                         if (pfcd1 < pfcd0 - eps_STEP_AP21) and (pfcd1 < pfcd2 - eps_STEP_AP21):
+#                                             if not array3x1match(pfs['xyz'][u], pointFeatures['xyz']):
+#                                                 pointFeatures['xyz'].append(pfs['xyz'][u])
+#                                                 pointFeatures['centroidDisp'].append(pfcd1)
+#                                                 pointFeatures['maxima'].append(False)
+#                                                 pointFeatures['minima'].append(True)
+#                                                 #pointFeatures['featureRef'].append(edge['edge_surroundIndex'])
+#                                                 pointFeatures['featureRef'].append(pfSurroundRef[pfsIndex])
+#                                                 pointFeatures['vertexRef'].append(None)
+#                                                 #print('B')
+#
+#                                 crawlindex += 1
+#
+#                 # print(AFSobj[afs_index]['SurfaceTypeName'])
+#                 # print(AFSobj[afs_index]['SurfaceRef'])
+#
+#         return pointFeatures
+#
+#
+#     # def vectorAngle(A, B, C):
+#     #     """angle between two points A & B relative to a third C"""
+#     #     CA = A - C
+#     #     CB = B - C
+#     #     return np.atan2(np.linalg.norm(np.cross(CA, CB)), np.dot(CA, CB)) / np.pi
+#
+#     # maxPointFeatures = vertexExtremaSearch(AFSobj, extremaType='maxima')
+#     # minPointFeatures = vertexExtremaSearch(AFSobj, extremaType='minima')
+#
+#     extremaLocale =  vertexExtremaSearch(AFSobj)
+#
+#     # extremaLocale = maxPointFeatures | minPointFeatures # > Python 3.9, requires explicit merge function prior to 3.4
+#     # extremaLocale = {**maxPointFeatures, **minPointFeatures}
+#
+#     # collate maxima minima extrema within all surfaces, note that local max/min implies that no global hierarchy is required
+#     # extremaLocale =  {'xyz':[], 'centroidDisp':[], 'maxima':[], 'minima':[], 'featureRef':[], 'vertexRef':[], 'adjRef':[]}
+#     # for mpf in [maxPointFeatures, minPointFeatures]:
+#     #     extremaLocale['xyz'] = extremaLocale['xyz'] + mpf['xyz']
+#     #     extremaLocale['centroidDisp'] = extremaLocale['centroidDisp'] + mpf['centroidDisp']
+#     #     extremaLocale['maxima'] = extremaLocale['maxima'] + mpf['maxima']
+#     #     extremaLocale['minima'] = extremaLocale['minima'] + mpf['minima']
+#     #     extremaLocale['featureRef'] = extremaLocale['featureRef'] + mpf['featureRef']
+#     #     extremaLocale['vertexRef'] = extremaLocale['vertexRef'] + mpf['vertexRef']
+#
+#     adjSurfaceSet = []
+#     # convert adjoining edge refs at vertex points to adjoining surfaces
+#     for spf_ind, spf in enumerate(extremaLocale['featureRef']):
+#         if len(spf.keys()) > 1: # case of vertex
+#             for afs in AFSobj:
+#                 if extremaLocale['vertexRef'][spf_ind] in afs['vertexAdjSurfaces'].keys():
+#                     adjSurfaceSet.append({extremaLocale['vertexRef'][spf_ind]: afs['vertexAdjSurfaces'][extremaLocale['vertexRef'][spf_ind]]})
+#                     break
+#         else: # edge point extrema not vertex point extrema
+#             adjSurfaceSet.append(spf)
+#     extremaLocale['adjRef'] = adjSurfaceSet
+#
+#     for afs in AFSobj:
+#         afspf_len = len(afs['globalExtrema']['xyz'])
+#         if afspf_len > 0:
+#             for afspf_index in range(0, afspf_len):
+#                 extremaLocale['xyz'].append(afs['globalExtrema']['xyz'][afspf_index])
+#                 extremaLocale['centroidDisp'].append(afs['globalExtrema']['centroidDisp'][afspf_index])
+#                 extremaLocale['featureRef'].append(afs['SurfaceRef'])
+#                 extremaLocale['vertexRef'].append(None)
+#                 if afs['globalExtrema']['maxima'][afspf_index]:
+#                     extremaLocale['maxima'].append(True)
+#                     extremaLocale['minima'].append(False)
+#                 else:
+#                     extremaLocale['maxima'].append(False)
+#                     extremaLocale['minima'].append(True)
+#
+#     # for each extrema point on an edge or vertex, compare against the relevant adjoining surfaces
+#     surfaceFeature = {'xyz':[], 'centroidDisp':[], 'maxima':[], 'minima':[]} #, 'featureRef':[]}
+#
+#     # same logic used as determining rotationally symmetric feature min/max/seam
+#     # every (STEP defined, part-of-surface, non-Klein bottle, self-intersecting etc) edge is only connected to two surfaces
+#     # does not necessarily hold for NURBS surfaces with multiple minima/maxima/saddle-points
+#
+#     # for every edge and 2 adjoining surfaces, displacement of minima from centroid are tested to determine local minima
+#
+#     singleExtremaSurface = [
+#         'SPHERICAL_SURFACE',
+#         'TOROIDAL_SURFACE',
+#         'CYLINDRICAL_SURFACE',
+#         'CONICAL_SURFACE',
+#         'PLANE',
+#         #'B_SPLINE_SURFACE_WITH_KNOTS',
+#         'SURFACE_OF_REVOLUTION',
+#         'BOUNDED_SURFACE']
+#
+#     # todo logic for NURBS - like simple surfaces, NURBS surfaces must include estimation of maxima/minima at edges 30/09/24
+#
+#     # NURBS surfaces & non-NURBS surface: recall that every extrema is unique from its neighbours, meaning that it constitutes a local maxima/minima
+#     # and may be included with a total tally of minima without consideration of edge maxima/minima
+#
+#     #complexSurfSet = []
+#
+#     for spf_index, spf_adj in enumerate(extremaLocale['adjRef']):
+#
+#         surfSet = list(spf_adj.values())[0]
+#         featureRef = list(spf_adj.keys())[0]
+#
+#         # remove NURBS surfaces from surfSet
+#         simpleSurfSet = [adjSurf for adjSurf in surfSet if AFSobj[adjSurf]['SurfaceTypeName'] in singleExtremaSurface]
+#         #[complexSurfSet.append(css) for css in surfSet if css not in simpleSurfSet and css not in complexSurfSet] #--------------------------------
+#
+#         #setFeatureRef = []
+#
+#         # if 22 in simpleSurfSet:
+#         #     _1=1
+#
+#         # maxima features
+#         if extremaLocale['maxima'][spf_index]:
+#
+#             # remove surfaces with minima non-edge/non-vertex surface extrema from surfSet
+#             # empty ['ParsedSurface']['pointFeature'] means no surface max/min, only edge/vertex
+#             # simpleSurfSet = [adjSurf for adjSurf in simpleSurfSet if AFSobj[adjSurf]['ParsedSurface']['pointFeature']['maxima'][0]]
+#             # null surface max/min feature points should not exist
+#
+#             #if len(simpleSurfSet) > 0: always attached surfaces
+#             # choowest from pointFeature or globalExtrema
+#             # surroundDisps = [max(AFSobj[adjSurf]['ParsedSurface']['pointFeature']['centroidDisp']) for adjSurf in simpleSurfSet]
+#
+#             if np.abs(extremaLocale['xyz'][spf_index][0] - 1.5) < eps and np.abs(extremaLocale['xyz'][spf_index][1] - 4) < eps and np.abs(extremaLocale['xyz'][spf_index][2]) < eps:
+#                 _1=1
+#
+#             # surroundDisps = []
+#             # for adjSurf in simpleSurfSet:
+#             #     surfaceFeatureFlag = False
+#             #     if len(AFSobj[adjSurf]['ParsedSurface']['pointFeature']['maxima']) > 0:
+#             #         if any(AFSobj[adjSurf]['ParsedSurface']['pointFeature']['maxima']):
+#             #             for isExtrema, maxDisp in zip(AFSobj[adjSurf]['ParsedSurface']['pointFeature']['maxima'],
+#             #                                           AFSobj[adjSurf]['ParsedSurface']['pointFeature']['centroidDisp']):
+#             #                 if isExtrema:
+#             #                     surroundDisps.append(maxDisp)
+#             #                     surfaceFeatureFlag = True
+#             #     if not surfaceFeatureFlag:
+#             #         surroundDisps.append(max(AFSobj[adjSurf]['globalExtrema']['centroidDisp']))
+#
+#             surroundDisps = []
+#             for adjSurf in simpleSurfSet:
+#                 if len(AFSobj[adjSurf]['ParsedSurface']['pointFeature']['centroidDisp']) > 0:
+#                     for extremaDisp in AFSobj[adjSurf]['ParsedSurface']['pointFeature']['centroidDisp']:
+#                         surroundDisps.append(extremaDisp)
+#                 else:
+#                     surroundDisps.append(max(AFSobj[adjSurf]['globalExtrema']['centroidDisp']))
+#
+#             featureDisp = extremaLocale['centroidDisp'][spf_index]
+#
+#
+#             if all([featureDisp >= (sd - eps) for sd in surroundDisps]):
+#                 # if featureRef not in setFeatureRef:
+#                 #     setFeatureRef.append(featureRef)
+#                 if not array3x1match(extremaLocale['xyz'][spf_index], surfaceFeature['xyz']):
+#                     #(featureRef not in surfaceFeature['featureRef'])):
+#                     # assign featureDisp local maxima
+#                     surfaceFeature['xyz'].append(extremaLocale['xyz'][spf_index])
+#                     surfaceFeature['centroidDisp'].append(extremaLocale['centroidDisp'][spf_index])
+#                     surfaceFeature['maxima'].append(True)
+#                     surfaceFeature['minima'].append(False)
+#
+#         if extremaLocale['minima'][spf_index]: # minima features
+#
+#             surroundDisps = []
+#             for adjSurf in simpleSurfSet:
+#                 surfaceFeatureFlag = False
+#                 if len(AFSobj[adjSurf]['ParsedSurface']['pointFeature']['minima']) > 0:
+#                     if any(AFSobj[adjSurf]['ParsedSurface']['pointFeature']['minima']):
+#                         for isExtrema, minDisp in zip(AFSobj[adjSurf]['ParsedSurface']['pointFeature']['minima'],
+#                                                       AFSobj[adjSurf]['ParsedSurface']['pointFeature']['centroidDisp']):
+#                             if isExtrema:
+#                                 surroundDisps.append(minDisp)
+#                                 surfaceFeatureFlag = True
+#                 if not surfaceFeatureFlag:
+#                     surroundDisps.append(min(AFSobj[adjSurf]['globalExtrema']['centroidDisp']))
+#
+#             featureDisp = extremaLocale['centroidDisp'][spf_index]
+#
+#             if all([featureDisp <= (sd + eps) for sd in surroundDisps]):
+#
+#                 # # assign featureDisp local minima
+#                 # if featureRef not in setFeatureRef:
+#                 #     setFeatureRef.append(featureRef)
+#
+#                 if not array3x1match(extremaLocale['xyz'][spf_index], surfaceFeature['xyz']):
+#                     surfaceFeature['xyz'].append(extremaLocale['xyz'][spf_index])
+#                     surfaceFeature['centroidDisp'].append(extremaLocale['centroidDisp'][spf_index])
+#                     surfaceFeature['maxima'].append(False)
+#                     surfaceFeature['minima'].append(True)
+#
+#     # for css in complexSurfSet:
+#     #     for css_index, css_maxima in enumerate(AFSobj[css]['ParsedSurface']['pointFeature']['maxima']):
+#     #         if array3x1match(AFSobj[css]['ParsedSurface']['pointFeature']['xyz'][css_index], surfaceFeature['xyz']):
+#     #             surfaceFeature['xyz'].append(AFSobj[css]['ParsedSurface']['pointFeature']['xyz'][css_index])
+#     #             surfaceFeature['centroidDisp'].append(AFSobj[css]['ParsedSurface']['pointFeature']['centroidDisp'][css_index])
+#     #             #surfaceFeature['featureRef'].append(AFSobj[css]['SurfaceRef'])
+#     #             if css_maxima:  # assign featureDisp local maxima
+#     #                 surfaceFeature['maxima'].append(True)
+#     #                 surfaceFeature['minima'].append(False)
+#     #             else:
+#     #                 surfaceFeature['maxima'].append(False)
+#     #                 surfaceFeature['minima'].append(True)
+#
+#     for afs in AFSobj: # should also include NURBS surfaces
+#         # including surface minimum only works if this value does not coincide with an edge minimum
+#         afspf_len = len(afs['ParsedSurface']['pointFeature']['xyz'])
+#         if afspf_len > 0:
+#             for afspf_index in range(0, afspf_len):
+#                 if not array3x1match(afs['ParsedSurface']['pointFeature']['xyz'][afspf_index], afs['globalExtrema']['xyz']):
+#                     surfaceFeature['xyz'].append(afs['ParsedSurface']['pointFeature']['xyz'][afspf_index])
+#                     surfaceFeature['centroidDisp'].append(afs['ParsedSurface']['pointFeature']['centroidDisp'][afspf_index])
+#                     if afs['ParsedSurface']['pointFeature']['maxima'][afspf_index]:
+#                         surfaceFeature['maxima'].append(True)
+#                         surfaceFeature['minima'].append(False)
+#                     else:
+#                         surfaceFeature['maxima'].append(False)
+#                         surfaceFeature['minima'].append(True)
+#
+#
+#     surfaceSphericalFeature = dict()
+#     surfaceSphericalFeature['rotSymCentre'] = []
+#     surfaceSphericalFeature['rotSymRadius'] = []
+#
+#     for afs in AFSobj:
+#         if (afs.get('ParsedSurface') is not None):
+#             # ['ParsedSurface']['pointFeature'] only covers internal features
+#             # for index_xyz, xyz in enumerate(afs['ParsedSurface']['pointFeature']['xyz']):
+#             #     if not array3x1match(xyz, extremaLocale['xyz']):
+#             #         extremaLocale['xyz'].append(xyz)
+#             #         extremaLocale['centroidDisp'].append(
+#             #             afs['ParsedSurface']['pointFeature']['centroidDisp'][index_xyz])
+#             #         extremaLocale['maxima'].append(afs['ParsedSurface']['pointFeature']['maxima'][index_xyz])
+#             #         extremaLocale['minima'].append(afs['ParsedSurface']['pointFeature']['minima'][index_xyz])
+#
+#                 # for OBE in afs['outerBoundEdgeLoop']:
+#                 #     for index_OBExyz, OBExyz in enumerate(OBE['pointFeature']['xyz']):
+#                 #         if not array3x1match(OBExyz, extremaLocale['xyz']):
+#                 #             extremaLocale['xyz'].append(OBExyz)
+#                 #             extremaLocale['centroidDisp'].append(OBE['pointFeature']['centroidDisp'][index_OBExyz])
+#                 #             extremaLocale['maxima'].append(OBE['pointFeature']['maxima'][index_OBExyz])
+#                 #             extremaLocale['minima'].append(OBE['pointFeature']['minima'][index_OBExyz])
+#
+#             if afs['SurfaceTypeName'] == 'SPHERICAL_SURFACE':
+#                 if afs['ParsedSurface']['sphereFeatureFlag']:
+#                     surfaceSphericalFeature['rotSymCentre'] = afs['ParsedSurface']['pointFeature']['rotSymFeature'][
+#                         'rotSymCentre']
+#                     surfaceSphericalFeature['rotSymRadius'] = afs['ParsedSurface']['pointFeature']['rotSymFeature'][
+#                         'rotSymRadius']
+#
+#     return surfaceFeature, surfaceSphericalFeature
 
 
 def getPointFeatures(AFSobj):
@@ -5880,7 +6865,9 @@ def getPointFeatures(AFSobj):
     order point features to return unique points and characteristics
     '''
 
-    def vertexExtremaSearch(AFSobj, extremaType='maxima'):
+    def vertexExtremaSearch(AFSobj):
+        # this is better adapted to NURBS edges, slow for OFF
+        # OFF doesn't have more than 2 maxima & 1 minima on any one edge
 
         pointFeatures = dict()
         pointFeatures['xyz'] = []
@@ -5894,41 +6881,28 @@ def getPointFeatures(AFSobj):
         vertexXref = ['vertex1ref', 'vertex2ref']
         vertexXref_surroundIndex = ['vertex1ref_surroundIndex', 'vertex2ref_surroundIndex']
 
-        extrema = dict()
-        for v in range(0, 2):  # vertex1, vertex2
+        for v in [0, 1]:  # vertex1, vertex2
             for afs_index, afs in enumerate(AFSobj):
                 for edge in afs['outerBoundEdgeLoop']:
-                    if (edge.get('superTypeNameFlag') is not None):
-                        if edge['superTypeName'] == 'SEAM_CURVE':  # exclude SEAM_CURVE data
-                            print("is this code reachable??")
-                            break
-                            # unnecessary?
 
-                    elif not edge.get('pointFeature'):
-                        # commence with searching local minima around edges associated with AFS surface
-                        # for each edge, get 'pointFeatures' fields
-                        print("missing pointFeature field")  # this should be checked elsewhere
-                        break
+                    # get local extrema (maxima & minima) for all vertex and attached edges,
+                    # retain extrema value in separate set, [surface]['outerBoundEdgeLoop'][edge]['pointFeature'][index]
+                    # for each pointFeature element, get max/min
+                    # for vertex1/2 find if relative max/min from adjacent pointFeature element - ignore surfaces for now
+                    # surroundIndex gives address of adjacent edges
+                    pfSurround = []
+                    pfSurroundRef = []
+                    adjacentEdgeRefs = []
+                    reversedOrder = []
 
-                    elif ((v == 0) and (edge[vertexXref[v]] not in extrema.keys())) or (
-                            (v == 1) and (edge[vertexXref[v]] not in extrema.keys())):
-                        # get localMinima for all vertex and attached edges,
-                        # retain extrema value in separate set, [surface]['outerBoundEdgeLoop'][edge]['pointFeature'][index]
+                    for vseRef in edge[vertexXref_surroundIndex[v]].keys():
 
-                        # for each pointFeature element, get max/min
-                        # for vertex1/2 find if relative max/min from adjacent pointFeature element - ignore surfaces for now
+                        adjacentEdgeRefs.append(vseRef)
+                        vse = edge[vertexXref_surroundIndex[v]][vseRef] #todo: dict values (surface/edge address may be superfluous)
 
-                        # u == 0, vertex1, get attached pointFeature
-                        # surroundIndex should give address of adjacent edges
-                        pfSurround = []
-                        adjacentEdgeRefs = []
-                        reversedOrder = []
-
-                        for vseRef in edge[vertexXref_surroundIndex[v]].keys():
-                            adjacentEdgeRefs.append(vseRef)
-                            vse = edge[vertexXref_surroundIndex[v]][vseRef]
-                            adjPF = AFSobj[vse[0]]['outerBoundEdgeLoop'][vse[1]]['pointFeature']
-                            if AFSobj[vse[0]]['outerBoundEdgeLoop'][vse[1]][vertexXref[v]] == edge[vertexXref[v]]:
+                        adjPF = AFSobj[vse[0]]['outerBoundEdgeLoop'][vse[1]]['pointFeature']
+                        if v==0:
+                            if edge[vertexXref[0]] == AFSobj[vse[0]]['outerBoundEdgeLoop'][vse[1]][vertexXref[0]]:
                                 pfSurround.append(adjPF)
                                 reversedOrder.append(False)
                             else:
@@ -5936,130 +6910,140 @@ def getPointFeatures(AFSobj):
                                 reversePF['u'] = adjPF['u'].copy()
                                 reversePF['u'].reverse()
                                 reversePF['xyz'] = adjPF['xyz'].copy()
-                                # if not isinstance(reversePF['xyz'], list):
-                                #     _1=1
                                 reversePF['xyz'].reverse()
                                 reversePF['centroidDisp'] = adjPF['centroidDisp'].copy()
                                 reversePF['centroidDisp'].reverse()
                                 pfSurround.append(reversePF)
                                 reversedOrder.append(True)
 
-                        # test vertexX with immediate neighbours
-                        if extremaType == 'maxima':
-                            if all([pfs['centroidDisp'][0] > pfs['centroidDisp'][1] + eps_STEP_AP21 for pfs in pfSurround]):
-                                if not array3x1match(edge[vertexX[v]], pointFeatures['xyz']):
-                                    pointFeatures['xyz'].append(edge[vertexX[v]].tolist())
-                                    pointFeatures['centroidDisp'].append(pfSurround[0]['centroidDisp'][0])
-                                    pointFeatures['maxima'].append(True)
-                                    pointFeatures['minima'].append(False)
-                                    pointFeatures['featureRef'].append(edge[vertexX[v]+'ref_surroundIndex'])
-                                    pointFeatures['vertexRef'].append(edge['vertex1ref'])
+                        elif v==1:
+                            if edge[vertexXref[1]] == AFSobj[vse[0]]['outerBoundEdgeLoop'][vse[1]][vertexXref[1]]:
+                                reversePF = dict()
+                                reversePF['u'] = adjPF['u'].copy()
+                                reversePF['u'].reverse()
+                                reversePF['xyz'] = adjPF['xyz'].copy()
+                                reversePF['xyz'].reverse()
+                                reversePF['centroidDisp'] = adjPF['centroidDisp'].copy()
+                                reversePF['centroidDisp'].reverse()
+                                pfSurround.append(reversePF)
+                                reversedOrder.append(True)
+                            else:
+                                pfSurround.append(adjPF)
+                                reversedOrder.append(False)
 
-                        elif extremaType == 'minima':
-                            if all([pfs['centroidDisp'][0] < pfs['centroidDisp'][1] - eps_STEP_AP21 for pfs in
-                                    pfSurround]):  # local min
-                                if not array3x1match(edge[vertexX[v]], pointFeatures['xyz']):
-                                    pointFeatures['xyz'].append(edge[vertexX[v]].tolist())
-                                    pointFeatures['centroidDisp'].append(pfSurround[0]['centroidDisp'][0])
-                                    pointFeatures['maxima'].append(False)
-                                    pointFeatures['minima'].append(True)
-                                    pointFeatures['featureRef'].append(edge[vertexX[v]+'ref_surroundIndex'])
-                                    pointFeatures['vertexRef'].append(edge['vertex1ref'])
+                        pfSurroundRef.append(AFSobj[vse[0]]['outerBoundEdgeLoop'][vse[1]]['edge_surroundIndex'])
 
-                        # search through intermediate extrema between vertices
-                        maxPFlen = max([len(pfs['u']) for pfs in pfSurround]) - 1
-                        if maxPFlen > 1:
-                            crawlindex = 1
-                            if type(maxPFlen) is not int:
-                                _1=1
-                            if type(crawlindex) is not int:
-                                _1=1
-                            while crawlindex < maxPFlen:
-                                # should capture all local max/min before second vertex
-                                for pfsIndex, pfs in enumerate(pfSurround):
-                                    # 'centroidDisp' find local maxima/minima
-                                    if crawlindex < len( pfs['centroidDisp']) - 1:
-                                        pfcd0 = pfs['centroidDisp'][crawlindex - 1]
-                                        pfcd1 = pfs['centroidDisp'][crawlindex]
-                                        pfcd2 = pfs['centroidDisp'][crawlindex + 1]
+                    # test vertexX with immediate neighbours
+                    # maxima calculation
+                    if all([pfs['centroidDisp'][0] > (pfs['centroidDisp'][1] + eps_STEP_AP21) for pfs in pfSurround]):
+                        if (edge[vertexXref[v]] in pointFeatures['vertexRef']):
+                            if pointFeatures['maxima'][pointFeatures['vertexRef'].index(edge[vertexXref[v]])]:
+                                pass
+                        else:
+                            pointFeatures['xyz'].append(edge[vertexX[v]].tolist())
+                            pointFeatures['centroidDisp'].append(pfSurround[0]['centroidDisp'][0])
+                            pointFeatures['maxima'].append(True)
+                            pointFeatures['minima'].append(False)
+                            pointFeatures['featureRef'].append(edge[vertexX[v]+'ref_surroundIndex'])
+                            pointFeatures['vertexRef'].append(edge[vertexXref[v]])
 
-                                        if reversedOrder[pfsIndex]:
-                                            u = len(pfs['u']) - crawlindex - 1
-                                        else:
-                                            u = crawlindex
+                    # minima calculation
+                    if all([pfs['centroidDisp'][0] < (pfs['centroidDisp'][1] - eps_STEP_AP21) for pfs in pfSurround]):
+                        if (edge[vertexXref[v]] in pointFeatures['vertexRef']):
+                            if pointFeatures['minima'][pointFeatures['vertexRef'].index(edge[vertexXref[v]])]:
+                                pass
+                        else:
+                            pointFeatures['xyz'].append(edge[vertexX[v]].tolist())
+                            pointFeatures['centroidDisp'].append(pfSurround[0]['centroidDisp'][0])
+                            pointFeatures['maxima'].append(False)
+                            pointFeatures['minima'].append(True)
+                            pointFeatures['featureRef'].append(edge[vertexX[v]+'ref_surroundIndex'])
+                            pointFeatures['vertexRef'].append(edge[vertexXref[v]])
 
-                                        if extremaType == 'maxima':  # local max
-                                            if (pfcd1 > pfcd0 + eps_STEP_AP21) and (pfcd1 > pfcd2 + eps_STEP_AP21):
-                                                if not array3x1match(pfs['xyz'][u], pointFeatures['xyz']):
-                                                    pointFeatures['xyz'].append(pfs['xyz'][u].tolist())
-                                                    pointFeatures['centroidDisp'].append(pfcd1)
-                                                    pointFeatures['maxima'].append(True)
-                                                    pointFeatures['minima'].append(False)
-                                                    pointFeatures['featureRef'].append(edge['edge_surroundIndex'])
-                                                    # if (pfs['u'][u] > (1 - eps_STEP_AP21))
-                                                    #     pointFeatures['ref'].append(edge['vertex1ref'])
-                                                    pointFeatures['vertexRef'].append(None)
+                    # once the extrema is not at a vertex, but lies on an edge, each edge is recorded independently
+                    # pointFeatures['featureRef'].append(edge['edge_surroundIndex']) should differ for pfSurround edges
 
-                                        elif extremaType == 'minima':  # local min
-                                            if (pfcd1 < pfcd0 - eps_STEP_AP21) and (pfcd1 < pfcd2 - eps_STEP_AP21):
-                                                if not array3x1match(pfs['xyz'][u], pointFeatures['xyz']):
-                                                    pointFeatures['xyz'].append(pfs['xyz'][u].tolist())
-                                                    pointFeatures['centroidDisp'].append(pfcd1)
-                                                    pointFeatures['maxima'].append(False)
-                                                    pointFeatures['minima'].append(True)
-                                                    pointFeatures['featureRef'].append(edge['edge_surroundIndex'])
-                                                    pointFeatures['vertexRef'].append(None)
+                    # search through intermediate extrema between vertices
+                    maxPFlen = max([len(pfs['u']) for pfs in pfSurround]) - 1
+                    if maxPFlen > 1:
+                        crawlindex = 1
+                        while crawlindex < maxPFlen:
+                            # should capture all local max/min before second vertex
+                            for pfsIndex, pfs in enumerate(pfSurround):
 
-                                crawlindex += 1
+                                # 'centroidDisp' find local maxima/minima
+                                if crawlindex < len( pfs['centroidDisp']) - 1:
+                                    pfcd0 = pfs['centroidDisp'][crawlindex - 1]
+                                    pfcd1 = pfs['centroidDisp'][crawlindex]
+                                    pfcd2 = pfs['centroidDisp'][crawlindex + 1]
 
-                # print(AFSobj[afs_index]['SurfaceTypeName'])
-                # print(AFSobj[afs_index]['SurfaceRef'])
+                                    if reversedOrder[pfsIndex]:
+                                        u = len(pfs['u']) - crawlindex - 1
+                                    else:
+                                        u = crawlindex
+
+                                    # local maxima
+                                    if (pfcd1 > pfcd0 + eps_STEP_AP21) and (pfcd1 > pfcd2 + eps_STEP_AP21):
+                                        if not array3x1match(pfs['xyz'][u], pointFeatures['xyz']):
+                                            pointFeatures['xyz'].append(pfs['xyz'][u])
+                                            pointFeatures['centroidDisp'].append(pfcd1)
+                                            pointFeatures['maxima'].append(True)
+                                            pointFeatures['minima'].append(False)
+                                            pointFeatures['featureRef'].append(pfSurroundRef[pfsIndex])
+                                            # if (pfs['u'][u] > (1 - eps_STEP_AP21))
+                                            #     pointFeatures['ref'].append(edge['vertex1ref'])
+                                            pointFeatures['vertexRef'].append(None)
+
+                                    # local minima
+                                    if (pfcd1 < pfcd0 - eps_STEP_AP21) and (pfcd1 < pfcd2 - eps_STEP_AP21):
+                                        if not array3x1match(pfs['xyz'][u], pointFeatures['xyz']):
+                                            pointFeatures['xyz'].append(pfs['xyz'][u])
+                                            pointFeatures['centroidDisp'].append(pfcd1)
+                                            pointFeatures['maxima'].append(False)
+                                            pointFeatures['minima'].append(True)
+                                            #pointFeatures['featureRef'].append(edge['edge_surroundIndex'])
+                                            pointFeatures['featureRef'].append(pfSurroundRef[pfsIndex])
+                                            pointFeatures['vertexRef'].append(None)
+
+                            crawlindex += 1
 
         return pointFeatures
 
-    # def vectorAngle(A, B, C):
-    #     """angle between two points A & B relative to a third C"""
-    #     CA = A - C
-    #     CB = B - C
-    #     return np.atan2(np.linalg.norm(np.cross(CA, CB)), np.dot(CA, CB)) / np.pi
-
-    maxPointFeatures = vertexExtremaSearch(AFSobj, extremaType='maxima')
-    minPointFeatures = vertexExtremaSearch(AFSobj, extremaType='minima')
-
-    # surfaceEdgeFeature = maxPointFeatures | minPointFeatures # > Python 3.9, requires explicit merge function prior to 3.4
-    # surfaceEdgeFeature = {**maxPointFeatures, **minPointFeatures}
-
-    # collate maxima minima extrema within all surfaces, note that local max/min implies that no global hierarchy is required
-    surfaceEdgeFeature =  {'xyz':[], 'centroidDisp':[], 'maxima':[], 'minima':[], 'featureRef':[], 'vertexRef':[], 'adjRef':[]}
-
-    for mpf in [maxPointFeatures, minPointFeatures]:
-        surfaceEdgeFeature['xyz'] = surfaceEdgeFeature['xyz'] + mpf['xyz']
-        surfaceEdgeFeature['centroidDisp'] = surfaceEdgeFeature['centroidDisp'] + mpf['centroidDisp']
-        surfaceEdgeFeature['maxima'] = surfaceEdgeFeature['maxima'] + mpf['maxima']
-        surfaceEdgeFeature['minima'] = surfaceEdgeFeature['minima'] + mpf['minima']
-        surfaceEdgeFeature['featureRef'] = surfaceEdgeFeature['featureRef'] + mpf['featureRef']
-        surfaceEdgeFeature['vertexRef'] = surfaceEdgeFeature['vertexRef'] + mpf['vertexRef']
+    extremaLocale =  vertexExtremaSearch(AFSobj)
 
     adjSurfaceSet = []
     # convert adjoining edge refs at vertex points to adjoining surfaces
-    for spf_ind, spf in enumerate(surfaceEdgeFeature['featureRef']):
+    for spf_ind, spf in enumerate(extremaLocale['featureRef']):
         if len(spf.keys()) > 1: # case of vertex
             for afs in AFSobj:
-                if surfaceEdgeFeature['vertexRef'][spf_ind] in afs['vertexAdjSurfaces'].keys():
-                    adjSurfaceSet.append({surfaceEdgeFeature['vertexRef'][spf_ind]: afs['vertexAdjSurfaces'][surfaceEdgeFeature['vertexRef'][spf_ind]]})
+                if extremaLocale['vertexRef'][spf_ind] in afs['vertexAdjSurfaces'].keys():
+                    adjSurfaceSet.append({extremaLocale['vertexRef'][spf_ind]: afs['vertexAdjSurfaces'][extremaLocale['vertexRef'][spf_ind]]})
                     break
         else: # edge point extrema not vertex point extrema
             adjSurfaceSet.append(spf)
+    extremaLocale['adjRef'] = adjSurfaceSet
 
-    surfaceEdgeFeature['adjRef'] = adjSurfaceSet
+    for afs in AFSobj:
+        afspf_len = len(afs['globalExtrema']['xyz'])
+        if afspf_len > 0:
+            for afspf_index in range(0, afspf_len):
+                extremaLocale['xyz'].append(afs['globalExtrema']['xyz'][afspf_index])
+                extremaLocale['centroidDisp'].append(afs['globalExtrema']['centroidDisp'][afspf_index])
+                extremaLocale['featureRef'].append(afs['SurfaceRef'])
+                extremaLocale['vertexRef'].append(None)
+                if afs['globalExtrema']['maxima'][afspf_index]:
+                    extremaLocale['maxima'].append(True)
+                    extremaLocale['minima'].append(False)
+                else:
+                    extremaLocale['maxima'].append(False)
+                    extremaLocale['minima'].append(True)
 
     # for each extrema point on an edge or vertex, compare against the relevant adjoining surfaces
-    surfaceFeature = {'xyz':[], 'centroidDisp':[], 'maxima':[], 'minima':[], 'featureRef':[]} # , 'featureRef' needed?
+    surfaceFeature = {'xyz':[], 'centroidDisp':[], 'maxima':[], 'minima':[]} #, 'featureRef':[]}
 
-    # same logic used as determining rotationally summetric feature min/max/seam
+    # same logic used as determining rotationally symmetric feature min/max/seam
     # every (STEP defined, part-of-surface, non-Klein bottle, self-intersecting etc) edge is only connected to two surfaces
     # does not necessarily hold for NURBS surfaces with multiple minima/maxima/saddle-points
-
     # for every edge and 2 adjoining surfaces, displacement of minima from centroid are tested to determine local minima
 
     singleExtremaSurface = [
@@ -6072,98 +7056,80 @@ def getPointFeatures(AFSobj):
         'SURFACE_OF_REVOLUTION',
         'BOUNDED_SURFACE']
 
-    # todo logic for NURBS - like simple surfaces, NURBS surfaces must include estimation of maxima/minima at edges 30/09/24
-
-    # NURBS surfaces: recall that every extrema is unique from its neighbours, meaning that it constitutes a local maxima/minima
+    # NURBS surfaces & non-NURBS surface: recall that every extrema is unique from its neighbours, meaning that it constitutes a local maxima/minima
     # and may be included with a total tally of minima without consideration of edge maxima/minima
 
-    complexSurfSet = []
-
-    for spf_index, spf_adj in enumerate(surfaceEdgeFeature['adjRef']):
+    for spf_index, spf_adj in enumerate(extremaLocale['adjRef']):
 
         surfSet = list(spf_adj.values())[0]
-        featureRef = list(spf_adj.keys())[0]
 
         # remove NURBS surfaces from surfSet
         simpleSurfSet = [adjSurf for adjSurf in surfSet if AFSobj[adjSurf]['SurfaceTypeName'] in singleExtremaSurface]
-        [complexSurfSet.append(css) for css in surfSet if css not in simpleSurfSet and css not in complexSurfSet]
-
-        # # test all surfaces are single minima/maxima types
-        # if all([AFSobj[adjSurf]['SurfaceTypeName'] in singleExtremaSurface for adjSurf in surfSet]):
 
         # maxima features
-        if surfaceEdgeFeature['maxima'][spf_index]:
-            if all([AFSobj[adjSurf]['ParsedSurface']['pointFeature']['maxima'][0] for adjSurf in simpleSurfSet]) :
+        if extremaLocale['maxima'][spf_index]:
 
-                surroundDisps = [AFSobj[adjSurf]['ParsedSurface']['pointFeature']['centroidDisp'] for adjSurf in simpleSurfSet]
-                featureDisp = surfaceEdgeFeature['centroidDisp'][spf_index]
+            # remove surfaces with minima non-edge/non-vertex surface extrema from surfSet
+            # empty ['ParsedSurface']['pointFeature'] means no surface max/min, only edge/vertex
+            # simpleSurfSet = [adjSurf for adjSurf in simpleSurfSet if AFSobj[adjSurf]['ParsedSurface']['pointFeature']['maxima'][0]]
+            # null surface max/min feature points should not exist
 
-                if all([featureDisp >= (sd + eps_STEP_AP21) for sd in surroundDisps]) and (featureRef not in surfaceFeature['featureRef']):
+            surroundDisps = []
+            for adjSurf in simpleSurfSet:
+                if len(AFSobj[adjSurf]['ParsedSurface']['pointFeature']['centroidDisp']) > 0:
+                    for extremaDisp in AFSobj[adjSurf]['ParsedSurface']['pointFeature']['centroidDisp']:
+                        surroundDisps.append(extremaDisp)
+                else:
+                    surroundDisps.append(max(AFSobj[adjSurf]['globalExtrema']['centroidDisp']))
+
+            featureDisp = extremaLocale['centroidDisp'][spf_index]
+
+            if all([featureDisp >= (sd - eps) for sd in surroundDisps]):
+                if not array3x1match(extremaLocale['xyz'][spf_index], surfaceFeature['xyz']):
                     # assign featureDisp local maxima
-                    surfaceFeature['xyz'].append(surfaceEdgeFeature['xyz'][spf_index])
-                    surfaceFeature['centroidDisp'].append(surfaceEdgeFeature['centroidDisp'][spf_index])
+                    surfaceFeature['xyz'].append(extremaLocale['xyz'][spf_index])
+                    surfaceFeature['centroidDisp'].append(extremaLocale['centroidDisp'][spf_index])
                     surfaceFeature['maxima'].append(True)
                     surfaceFeature['minima'].append(False)
-                    surfaceFeature['featureRef'].append(featureRef)
 
-                for sds_index, sds in enumerate(surroundDisps):
-                    if all([(sds - eps_STEP_AP21) >= sd for sd in surroundDisps]) and \
-                            (AFSobj[simpleSurfSet[sds_index]]['SurfaceRef'] not in surfaceFeature['featureRef']):
-                        surfaceFeature['xyz'].append(AFSobj[simpleSurfSet[sds_index]]['ParsedSurface']['pointFeature']['xyz'][0].tolist())
-                        surfaceFeature['centroidDisp'].append(AFSobj[simpleSurfSet[sds_index]]['ParsedSurface']['pointFeature']['centroidDisp'][0])
-                        surfaceFeature['maxima'].append(True)
-                        surfaceFeature['minima'].append(False)
-                        surfaceFeature['featureRef'].append(AFSobj[simpleSurfSet[sds_index]]['SurfaceRef'])
+        if extremaLocale['minima'][spf_index]: # minima features
 
-            elif (featureRef not in surfaceFeature['featureRef']): # feature is maxima unique
-                surfaceFeature['xyz'].append(surfaceEdgeFeature['xyz'][spf_index])
-                surfaceFeature['centroidDisp'].append(surfaceEdgeFeature['centroidDisp'][spf_index])
-                surfaceFeature['maxima'].append(True)
-                surfaceFeature['minima'].append(False)
-                surfaceFeature['featureRef'].append(featureRef)
+            surroundDisps = []
+            for adjSurf in simpleSurfSet:
+                surfaceFeatureFlag = False
+                if len(AFSobj[adjSurf]['ParsedSurface']['pointFeature']['minima']) > 0:
+                    if any(AFSobj[adjSurf]['ParsedSurface']['pointFeature']['minima']):
+                        for isExtrema, minDisp in zip(AFSobj[adjSurf]['ParsedSurface']['pointFeature']['minima'],
+                                                      AFSobj[adjSurf]['ParsedSurface']['pointFeature']['centroidDisp']):
+                            if isExtrema:
+                                surroundDisps.append(minDisp)
+                                surfaceFeatureFlag = True
+                if not surfaceFeatureFlag:
+                    surroundDisps.append(min(AFSobj[adjSurf]['globalExtrema']['centroidDisp']))
 
-        # minima features
-        if surfaceEdgeFeature['minima'][spf_index]:
-            if all([AFSobj[adjSurf]['ParsedSurface']['pointFeature']['minima'][0] for adjSurf in simpleSurfSet]):
+            featureDisp = extremaLocale['centroidDisp'][spf_index]
 
-                surroundDisps = [AFSobj[adjSurf]['ParsedSurface']['pointFeature']['centroidDisp'][0] for adjSurf in simpleSurfSet]
-                featureDisp = surfaceEdgeFeature['centroidDisp'][spf_index]
-
-                if all([featureDisp <= (sd - eps_STEP_AP21) for sd in surroundDisps]) and (featureRef not in surfaceFeature['featureRef']):
-                    # assign featureDisp local maxima
-                    surfaceFeature['xyz'].append(surfaceEdgeFeature['xyz'][spf_index])
-                    surfaceFeature['centroidDisp'].append(surfaceEdgeFeature['centroidDisp'][spf_index])
+            if all([featureDisp <= (sd + eps) for sd in surroundDisps]):
+                if not array3x1match(extremaLocale['xyz'][spf_index], surfaceFeature['xyz']):
+                    surfaceFeature['xyz'].append(extremaLocale['xyz'][spf_index])
+                    surfaceFeature['centroidDisp'].append(extremaLocale['centroidDisp'][spf_index])
                     surfaceFeature['maxima'].append(False)
                     surfaceFeature['minima'].append(True)
-                    surfaceFeature['featureRef'].append(featureRef)
 
-                for sds_index, sds in enumerate(surroundDisps):
-                    if all([(sds - eps_STEP_AP21) <= sd for sd in surroundDisps]) and \
-                            (AFSobj[simpleSurfSet[sds_index]]['SurfaceRef'] not in surfaceFeature['featureRef']):
-                        surfaceFeature['xyz'].append(AFSobj[simpleSurfSet[sds_index]]['ParsedSurface']['pointFeature']['xyz'][0].tolist())
-                        surfaceFeature['centroidDisp'].append(AFSobj[simpleSurfSet[sds_index]]['ParsedSurface']['pointFeature']['centroidDisp'][0])
+    for afs in AFSobj: # also includes NURBS surfaces
+        # including surface minimum only works if this value does not coincide with an edge minimum
+        afspf_len = len(afs['ParsedSurface']['pointFeature']['xyz'])
+        if afspf_len > 0:
+            for afspf_index in range(0, afspf_len):
+                if not array3x1match(afs['ParsedSurface']['pointFeature']['xyz'][afspf_index], afs['globalExtrema']['xyz']):
+                    surfaceFeature['xyz'].append(afs['ParsedSurface']['pointFeature']['xyz'][afspf_index])
+                    surfaceFeature['centroidDisp'].append(afs['ParsedSurface']['pointFeature']['centroidDisp'][afspf_index])
+                    if afs['ParsedSurface']['pointFeature']['maxima'][afspf_index]:
+                        surfaceFeature['maxima'].append(True)
+                        surfaceFeature['minima'].append(False)
+                    else:
                         surfaceFeature['maxima'].append(False)
                         surfaceFeature['minima'].append(True)
-                        surfaceFeature['featureRef'].append(AFSobj[simpleSurfSet[sds_index]]['SurfaceRef'])
-
-            elif (featureRef not in surfaceFeature['featureRef']):
-                surfaceFeature['xyz'].append(surfaceEdgeFeature['xyz'][spf_index])
-                surfaceFeature['centroidDisp'].append(surfaceEdgeFeature['centroidDisp'][spf_index])
-                surfaceFeature['maxima'].append(False)
-                surfaceFeature['minima'].append(True)
-                surfaceFeature['featureRef'].append(featureRef)
-
-    for css in complexSurfSet:
-        for css_index, css_maxima in enumerate(AFSobj[css]['ParsedSurface']['pointFeature']['maxima']):
-            surfaceFeature['xyz'].append(AFSobj[css]['ParsedSurface']['pointFeature']['xyz'][css_index])
-            surfaceFeature['centroidDisp'].append(AFSobj[css]['ParsedSurface']['pointFeature']['centroidDisp'][css_index])
-            surfaceFeature['featureRef'].append(AFSobj[css]['SurfaceRef'])
-            if css_maxima:  # assign featureDisp local maxima
-                surfaceFeature['maxima'].append(True)
-                surfaceFeature['minima'].append(False)
-            else:
-                surfaceFeature['maxima'].append(False)
-                surfaceFeature['minima'].append(True)
 
     surfaceSphericalFeature = dict()
     surfaceSphericalFeature['rotSymCentre'] = []
@@ -6173,20 +7139,20 @@ def getPointFeatures(AFSobj):
         if (afs.get('ParsedSurface') is not None):
             # ['ParsedSurface']['pointFeature'] only covers internal features
             # for index_xyz, xyz in enumerate(afs['ParsedSurface']['pointFeature']['xyz']):
-            #     if not array3x1match(xyz, surfaceEdgeFeature['xyz']):
-            #         surfaceEdgeFeature['xyz'].append(xyz)
-            #         surfaceEdgeFeature['centroidDisp'].append(
+            #     if not array3x1match(xyz, extremaLocale['xyz']):
+            #         extremaLocale['xyz'].append(xyz)
+            #         extremaLocale['centroidDisp'].append(
             #             afs['ParsedSurface']['pointFeature']['centroidDisp'][index_xyz])
-            #         surfaceEdgeFeature['maxima'].append(afs['ParsedSurface']['pointFeature']['maxima'][index_xyz])
-            #         surfaceEdgeFeature['minima'].append(afs['ParsedSurface']['pointFeature']['minima'][index_xyz])
+            #         extremaLocale['maxima'].append(afs['ParsedSurface']['pointFeature']['maxima'][index_xyz])
+            #         extremaLocale['minima'].append(afs['ParsedSurface']['pointFeature']['minima'][index_xyz])
 
                 # for OBE in afs['outerBoundEdgeLoop']:
                 #     for index_OBExyz, OBExyz in enumerate(OBE['pointFeature']['xyz']):
-                #         if not array3x1match(OBExyz, surfaceEdgeFeature['xyz']):
-                #             surfaceEdgeFeature['xyz'].append(OBExyz)
-                #             surfaceEdgeFeature['centroidDisp'].append(OBE['pointFeature']['centroidDisp'][index_OBExyz])
-                #             surfaceEdgeFeature['maxima'].append(OBE['pointFeature']['maxima'][index_OBExyz])
-                #             surfaceEdgeFeature['minima'].append(OBE['pointFeature']['minima'][index_OBExyz])
+                #         if not array3x1match(OBExyz, extremaLocale['xyz']):
+                #             extremaLocale['xyz'].append(OBExyz)
+                #             extremaLocale['centroidDisp'].append(OBE['pointFeature']['centroidDisp'][index_OBExyz])
+                #             extremaLocale['maxima'].append(OBE['pointFeature']['maxima'][index_OBExyz])
+                #             extremaLocale['minima'].append(OBE['pointFeature']['minima'][index_OBExyz])
 
             if afs['SurfaceTypeName'] == 'SPHERICAL_SURFACE':
                 if afs['ParsedSurface']['sphereFeatureFlag']:
@@ -6198,7 +7164,334 @@ def getPointFeatures(AFSobj):
     return surfaceFeature, surfaceSphericalFeature
 
 
-def translateShapeMatchFormat():
+# def getPointFeatures_(AFSobj):
+#     '''
+#     order point features to return unique points and characteristics
+#     '''
+#
+#     def vertexExtremaSearch(AFSobj, extremaType='maxima'):
+#
+#         pointFeatures = dict()
+#         pointFeatures['xyz'] = []
+#         pointFeatures['centroidDisp'] = []
+#         pointFeatures['maxima'] = []
+#         pointFeatures['minima'] = []
+#         pointFeatures['featureRef'] = []
+#         pointFeatures['vertexRef'] = []
+#
+#         vertexX = ['vertex1', 'vertex2']
+#         vertexXref = ['vertex1ref', 'vertex2ref']
+#         vertexXref_surroundIndex = ['vertex1ref_surroundIndex', 'vertex2ref_surroundIndex']
+#
+#         extrema = dict()
+#         for v in range(0, 2):  # vertex1, vertex2
+#             for afs_index, afs in enumerate(AFSobj):
+#                 for edge in afs['outerBoundEdgeLoop']:
+#                     if (edge.get('superTypeNameFlag') is not None):
+#                         if edge['superTypeName'] == 'SEAM_CURVE':  # exclude SEAM_CURVE data
+#                             print("is this code reachable??")
+#                             break
+#                             # unnecessary?
+#
+#                     elif not edge.get('pointFeature'):
+#                         # commence with searching local minima around edges associated with AFS surface
+#                         # for each edge, get 'pointFeatures' fields
+#                         print("missing pointFeature field")  # this should be checked elsewhere
+#                         break
+#
+#                     elif ((v == 0) and (edge[vertexXref[v]] not in extrema.keys())) or (
+#                             (v == 1) and (edge[vertexXref[v]] not in extrema.keys())):
+#                         # get localMinima for all vertex and attached edges,
+#                         # retain extrema value in separate set, [surface]['outerBoundEdgeLoop'][edge]['pointFeature'][index]
+#
+#                         # for each pointFeature element, get max/min
+#                         # for vertex1/2 find if relative max/min from adjacent pointFeature element - ignore surfaces for now
+#
+#                         # u == 0, vertex1, get attached pointFeature
+#                         # surroundIndex should give address of adjacent edges
+#                         pfSurround = []
+#                         adjacentEdgeRefs = []
+#                         reversedOrder = []
+#
+#                         for vseRef in edge[vertexXref_surroundIndex[v]].keys():
+#                             adjacentEdgeRefs.append(vseRef)
+#                             vse = edge[vertexXref_surroundIndex[v]][vseRef] #todo: dict values (surface/edge address may be superfluous)
+#                             adjPF = AFSobj[vse[0]]['outerBoundEdgeLoop'][vse[1]]['pointFeature']
+#                             if AFSobj[vse[0]]['outerBoundEdgeLoop'][vse[1]][vertexXref[v]] == edge[vertexXref[v]]:
+#                                 pfSurround.append(adjPF)
+#                                 reversedOrder.append(False)
+#                             else:
+#                                 reversePF = dict()
+#                                 reversePF['u'] = adjPF['u'].copy()
+#                                 reversePF['u'].reverse()
+#                                 reversePF['xyz'] = adjPF['xyz'].copy()
+#                                 # if not isinstance(reversePF['xyz'], list):
+#                                 #     _1=1
+#                                 reversePF['xyz'].reverse()
+#                                 reversePF['centroidDisp'] = adjPF['centroidDisp'].copy()
+#                                 reversePF['centroidDisp'].reverse()
+#                                 pfSurround.append(reversePF)
+#                                 reversedOrder.append(True)
+#
+#                         # test vertexX with immediate neighbours
+#                         if extremaType == 'maxima':
+#                             if all([pfs['centroidDisp'][0] > pfs['centroidDisp'][1] + eps_STEP_AP21 for pfs in pfSurround]):
+#                                 if not array3x1match(edge[vertexX[v]], pointFeatures['xyz']):
+#                                     pointFeatures['xyz'].append(edge[vertexX[v]].tolist())
+#                                     pointFeatures['centroidDisp'].append(pfSurround[0]['centroidDisp'][0])
+#                                     pointFeatures['maxima'].append(True)
+#                                     pointFeatures['minima'].append(False)
+#                                     pointFeatures['featureRef'].append(edge[vertexX[v]+'ref_surroundIndex'])
+#                                     pointFeatures['vertexRef'].append(edge['vertex1ref'])
+#
+#                         elif extremaType == 'minima':
+#                             if all([pfs['centroidDisp'][0] < pfs['centroidDisp'][1] - eps_STEP_AP21 for pfs in
+#                                     pfSurround]):  # local min
+#                                 if not array3x1match(edge[vertexX[v]], pointFeatures['xyz']):
+#                                     pointFeatures['xyz'].append(edge[vertexX[v]].tolist())
+#                                     pointFeatures['centroidDisp'].append(pfSurround[0]['centroidDisp'][0])
+#                                     pointFeatures['maxima'].append(False)
+#                                     pointFeatures['minima'].append(True)
+#                                     pointFeatures['featureRef'].append(edge[vertexX[v]+'ref_surroundIndex'])
+#                                     pointFeatures['vertexRef'].append(edge['vertex1ref'])
+#
+#                         # search through intermediate extrema between vertices
+#                         maxPFlen = max([len(pfs['u']) for pfs in pfSurround]) - 1
+#                         if maxPFlen > 1:
+#                             crawlindex = 1
+#                             if type(maxPFlen) is not int:
+#                                 _1=1
+#                             if type(crawlindex) is not int:
+#                                 _1=1
+#                             while crawlindex < maxPFlen:
+#                                 # should capture all local max/min before second vertex
+#                                 for pfsIndex, pfs in enumerate(pfSurround):
+#                                     # 'centroidDisp' find local maxima/minima
+#                                     if crawlindex < len( pfs['centroidDisp']) - 1:
+#                                         pfcd0 = pfs['centroidDisp'][crawlindex - 1]
+#                                         pfcd1 = pfs['centroidDisp'][crawlindex]
+#                                         pfcd2 = pfs['centroidDisp'][crawlindex + 1]
+#
+#                                         if reversedOrder[pfsIndex]:
+#                                             u = len(pfs['u']) - crawlindex - 1
+#                                         else:
+#                                             u = crawlindex
+#
+#                                         if extremaType == 'maxima':  # local max
+#                                             if (pfcd1 > pfcd0 + eps_STEP_AP21) and (pfcd1 > pfcd2 + eps_STEP_AP21):
+#                                                 if not array3x1match(pfs['xyz'][u], pointFeatures['xyz']):
+#                                                     pointFeatures['xyz'].append(pfs['xyz'][u].tolist())
+#                                                     pointFeatures['centroidDisp'].append(pfcd1)
+#                                                     pointFeatures['maxima'].append(True)
+#                                                     pointFeatures['minima'].append(False)
+#                                                     pointFeatures['featureRef'].append(edge['edge_surroundIndex'])
+#                                                     # if (pfs['u'][u] > (1 - eps_STEP_AP21))
+#                                                     #     pointFeatures['ref'].append(edge['vertex1ref'])
+#                                                     pointFeatures['vertexRef'].append(None)
+#
+#                                         elif extremaType == 'minima':  # local min
+#                                             if (pfcd1 < pfcd0 - eps_STEP_AP21) and (pfcd1 < pfcd2 - eps_STEP_AP21):
+#                                                 if not array3x1match(pfs['xyz'][u], pointFeatures['xyz']):
+#                                                     pointFeatures['xyz'].append(pfs['xyz'][u].tolist())
+#                                                     pointFeatures['centroidDisp'].append(pfcd1)
+#                                                     pointFeatures['maxima'].append(False)
+#                                                     pointFeatures['minima'].append(True)
+#                                                     pointFeatures['featureRef'].append(edge['edge_surroundIndex'])
+#                                                     pointFeatures['vertexRef'].append(None)
+#
+#                                 crawlindex += 1
+#
+#                 # print(AFSobj[afs_index]['SurfaceTypeName'])
+#                 # print(AFSobj[afs_index]['SurfaceRef'])
+#
+#         return pointFeatures
+#
+#     # def vectorAngle(A, B, C):
+#     #     """angle between two points A & B relative to a third C"""
+#     #     CA = A - C
+#     #     CB = B - C
+#     #     return np.atan2(np.linalg.norm(np.cross(CA, CB)), np.dot(CA, CB)) / np.pi
+#
+#     maxPointFeatures = vertexExtremaSearch(AFSobj, extremaType='maxima')
+#     minPointFeatures = vertexExtremaSearch(AFSobj, extremaType='minima')
+#
+#     # surfaceEdgeFeature = maxPointFeatures | minPointFeatures # > Python 3.9, requires explicit merge function prior to 3.4
+#     # surfaceEdgeFeature = {**maxPointFeatures, **minPointFeatures}
+#
+#     # collate maxima minima extrema within all surfaces, note that local max/min implies that no global hierarchy is required
+#     surfaceEdgeFeature =  {'xyz':[], 'centroidDisp':[], 'maxima':[], 'minima':[], 'featureRef':[], 'vertexRef':[], 'adjRef':[]}
+#
+#     for mpf in [maxPointFeatures, minPointFeatures]:
+#         surfaceEdgeFeature['xyz'] = surfaceEdgeFeature['xyz'] + mpf['xyz']
+#         surfaceEdgeFeature['centroidDisp'] = surfaceEdgeFeature['centroidDisp'] + mpf['centroidDisp']
+#         surfaceEdgeFeature['maxima'] = surfaceEdgeFeature['maxima'] + mpf['maxima']
+#         surfaceEdgeFeature['minima'] = surfaceEdgeFeature['minima'] + mpf['minima']
+#         surfaceEdgeFeature['featureRef'] = surfaceEdgeFeature['featureRef'] + mpf['featureRef']
+#         surfaceEdgeFeature['vertexRef'] = surfaceEdgeFeature['vertexRef'] + mpf['vertexRef']
+#
+#     adjSurfaceSet = []
+#     # convert adjoining edge refs at vertex points to adjoining surfaces
+#     for spf_ind, spf in enumerate(surfaceEdgeFeature['featureRef']):
+#         if len(spf.keys()) > 1: # case of vertex
+#             for afs in AFSobj:
+#                 if surfaceEdgeFeature['vertexRef'][spf_ind] in afs['vertexAdjSurfaces'].keys():
+#                     adjSurfaceSet.append({surfaceEdgeFeature['vertexRef'][spf_ind]: afs['vertexAdjSurfaces'][surfaceEdgeFeature['vertexRef'][spf_ind]]})
+#                     break
+#         else: # edge point extrema not vertex point extrema
+#             adjSurfaceSet.append(spf)
+#
+#     surfaceEdgeFeature['adjRef'] = adjSurfaceSet
+#
+#     # for each extrema point on an edge or vertex, compare against the relevant adjoining surfaces
+#     surfaceFeature = {'xyz':[], 'centroidDisp':[], 'maxima':[], 'minima':[], 'featureRef':[]} # , 'featureRef' needed?
+#
+#     # same logic used as determining rotationally sYmmetric feature min/max/seam
+#     # every (STEP defined, part-of-surface, non-Klein bottle, self-intersecting etc) edge is only connected to two surfaces
+#     # does not necessarily hold for NURBS surfaces with multiple minima/maxima/saddle-points
+#
+#     # for every edge and 2 adjoining surfaces, displacement of minima from centroid are tested to determine local minima
+#
+#     singleExtremaSurface = [
+#         'SPHERICAL_SURFACE',
+#         'TOROIDAL_SURFACE',
+#         'CYLINDRICAL_SURFACE',
+#         'CONICAL_SURFACE',
+#         'PLANE',
+#         #'B_SPLINE_SURFACE_WITH_KNOTS',
+#         'SURFACE_OF_REVOLUTION',
+#         'BOUNDED_SURFACE']
+#
+#     # todo logic for NURBS - like simple surfaces, NURBS surfaces must include estimation of maxima/minima at edges 30/09/24
+#
+#     # NURBS surfaces: recall that every extrema is unique from its neighbours, meaning that it constitutes a local maxima/minima
+#     # and may be included with a total tally of minima without consideration of edge maxima/minima
+#
+#     complexSurfSet = []
+#
+#     for spf_index, spf_adj in enumerate(surfaceEdgeFeature['adjRef']):
+#
+#         surfSet = list(spf_adj.values())[0]
+#         featureRef = list(spf_adj.keys())[0]
+#
+#         # remove NURBS surfaces from surfSet
+#         simpleSurfSet = [adjSurf for adjSurf in surfSet if AFSobj[adjSurf]['SurfaceTypeName'] in singleExtremaSurface]
+#         [complexSurfSet.append(css) for css in surfSet if css not in simpleSurfSet and css not in complexSurfSet]
+#
+#         # remove surfaces missing non-edge/vertex extrema from surfSet
+#         simpleSurfSet = [adjSurf for adjSurf in simpleSurfSet if len(AFSobj[adjSurf]['ParsedSurface']['pointFeature']['centroidDisp']) > 0]
+#
+#         # # test all surfaces are single minima/maxima types
+#         # if all([AFSobj[adjSurf]['SurfaceTypeName'] in singleExtremaSurface for adjSurf in surfSet]):
+#
+#         # maxima features
+#         if surfaceEdgeFeature['maxima'][spf_index]:
+#             # empty ['ParsedSurface']['pointFeature'] means no surface max/min, only edge/vertex
+#             if all([AFSobj[adjSurf]['ParsedSurface']['pointFeature']['maxima'][0] for adjSurf in simpleSurfSet]) :
+#
+#                 surroundDisps = [AFSobj[adjSurf]['ParsedSurface']['pointFeature']['centroidDisp'] for adjSurf in simpleSurfSet]
+#                 featureDisp = surfaceEdgeFeature['centroidDisp'][spf_index]
+#
+#                 if all([featureDisp >= (sd + eps_STEP_AP21) for sd in surroundDisps]) and (featureRef not in surfaceFeature['featureRef']):
+#                     # assign featureDisp local maxima
+#                     surfaceFeature['xyz'].append(surfaceEdgeFeature['xyz'][spf_index])
+#                     surfaceFeature['centroidDisp'].append(surfaceEdgeFeature['centroidDisp'][spf_index])
+#                     surfaceFeature['maxima'].append(True)
+#                     surfaceFeature['minima'].append(False)
+#                     surfaceFeature['featureRef'].append(featureRef)
+#
+#                 for sds_index, sds in enumerate(surroundDisps):
+#                     if all([(sds - eps_STEP_AP21) >= sd for sd in surroundDisps]) and \
+#                             (AFSobj[simpleSurfSet[sds_index]]['SurfaceRef'] not in surfaceFeature['featureRef']):
+#                         surfaceFeature['xyz'].append(AFSobj[simpleSurfSet[sds_index]]['ParsedSurface']['pointFeature']['xyz'][0].tolist())
+#                         surfaceFeature['centroidDisp'].append(AFSobj[simpleSurfSet[sds_index]]['ParsedSurface']['pointFeature']['centroidDisp'][0])
+#                         surfaceFeature['maxima'].append(True)
+#                         surfaceFeature['minima'].append(False)
+#                         surfaceFeature['featureRef'].append(AFSobj[simpleSurfSet[sds_index]]['SurfaceRef'])
+#
+#             elif (featureRef not in surfaceFeature['featureRef']): # feature is maxima unique
+#                 surfaceFeature['xyz'].append(surfaceEdgeFeature['xyz'][spf_index])
+#                 surfaceFeature['centroidDisp'].append(surfaceEdgeFeature['centroidDisp'][spf_index])
+#                 surfaceFeature['maxima'].append(True)
+#                 surfaceFeature['minima'].append(False)
+#                 surfaceFeature['featureRef'].append(featureRef)
+#
+#         # minima features
+#         if surfaceEdgeFeature['minima'][spf_index]:
+#             if all([AFSobj[adjSurf]['ParsedSurface']['pointFeature']['minima'][0] for adjSurf in simpleSurfSet]):
+#
+#                 surroundDisps = [AFSobj[adjSurf]['ParsedSurface']['pointFeature']['centroidDisp'][0] for adjSurf in simpleSurfSet]
+#                 featureDisp = surfaceEdgeFeature['centroidDisp'][spf_index]
+#
+#                 if all([featureDisp <= (sd - eps_STEP_AP21) for sd in surroundDisps]) and (featureRef not in surfaceFeature['featureRef']):
+#                     # assign featureDisp local minima
+#                     surfaceFeature['xyz'].append(surfaceEdgeFeature['xyz'][spf_index])
+#                     surfaceFeature['centroidDisp'].append(surfaceEdgeFeature['centroidDisp'][spf_index])
+#                     surfaceFeature['maxima'].append(False)
+#                     surfaceFeature['minima'].append(True)
+#                     surfaceFeature['featureRef'].append(featureRef)
+#
+#                 for sds_index, sds in enumerate(surroundDisps):
+#                     if all([(sds - eps_STEP_AP21) <= sd for sd in surroundDisps]) and \
+#                             (AFSobj[simpleSurfSet[sds_index]]['SurfaceRef'] not in surfaceFeature['featureRef']):
+#                         surfaceFeature['xyz'].append(AFSobj[simpleSurfSet[sds_index]]['ParsedSurface']['pointFeature']['xyz'][0].tolist())
+#                         surfaceFeature['centroidDisp'].append(AFSobj[simpleSurfSet[sds_index]]['ParsedSurface']['pointFeature']['centroidDisp'][0])
+#                         surfaceFeature['maxima'].append(False)
+#                         surfaceFeature['minima'].append(True)
+#                         surfaceFeature['featureRef'].append(AFSobj[simpleSurfSet[sds_index]]['SurfaceRef'])
+#
+#             elif (featureRef not in surfaceFeature['featureRef']):
+#                 surfaceFeature['xyz'].append(surfaceEdgeFeature['xyz'][spf_index])
+#                 surfaceFeature['centroidDisp'].append(surfaceEdgeFeature['centroidDisp'][spf_index])
+#                 surfaceFeature['maxima'].append(False)
+#                 surfaceFeature['minima'].append(True)
+#                 surfaceFeature['featureRef'].append(featureRef)
+#
+#     for css in complexSurfSet:
+#         for css_index, css_maxima in enumerate(AFSobj[css]['ParsedSurface']['pointFeature']['maxima']):
+#             surfaceFeature['xyz'].append(AFSobj[css]['ParsedSurface']['pointFeature']['xyz'][css_index])
+#             surfaceFeature['centroidDisp'].append(AFSobj[css]['ParsedSurface']['pointFeature']['centroidDisp'][css_index])
+#             surfaceFeature['featureRef'].append(AFSobj[css]['SurfaceRef'])
+#             if css_maxima:  # assign featureDisp local maxima
+#                 surfaceFeature['maxima'].append(True)
+#                 surfaceFeature['minima'].append(False)
+#             else:
+#                 surfaceFeature['maxima'].append(False)
+#                 surfaceFeature['minima'].append(True)
+#
+#     surfaceSphericalFeature = dict()
+#     surfaceSphericalFeature['rotSymCentre'] = []
+#     surfaceSphericalFeature['rotSymRadius'] = []
+#
+#     for afs in AFSobj:
+#         if (afs.get('ParsedSurface') is not None):
+#             # ['ParsedSurface']['pointFeature'] only covers internal features
+#             # for index_xyz, xyz in enumerate(afs['ParsedSurface']['pointFeature']['xyz']):
+#             #     if not array3x1match(xyz, surfaceEdgeFeature['xyz']):
+#             #         surfaceEdgeFeature['xyz'].append(xyz)
+#             #         surfaceEdgeFeature['centroidDisp'].append(
+#             #             afs['ParsedSurface']['pointFeature']['centroidDisp'][index_xyz])
+#             #         surfaceEdgeFeature['maxima'].append(afs['ParsedSurface']['pointFeature']['maxima'][index_xyz])
+#             #         surfaceEdgeFeature['minima'].append(afs['ParsedSurface']['pointFeature']['minima'][index_xyz])
+#
+#                 # for OBE in afs['outerBoundEdgeLoop']:
+#                 #     for index_OBExyz, OBExyz in enumerate(OBE['pointFeature']['xyz']):
+#                 #         if not array3x1match(OBExyz, surfaceEdgeFeature['xyz']):
+#                 #             surfaceEdgeFeature['xyz'].append(OBExyz)
+#                 #             surfaceEdgeFeature['centroidDisp'].append(OBE['pointFeature']['centroidDisp'][index_OBExyz])
+#                 #             surfaceEdgeFeature['maxima'].append(OBE['pointFeature']['maxima'][index_OBExyz])
+#                 #             surfaceEdgeFeature['minima'].append(OBE['pointFeature']['minima'][index_OBExyz])
+#
+#             if afs['SurfaceTypeName'] == 'SPHERICAL_SURFACE':
+#                 if afs['ParsedSurface']['sphereFeatureFlag']:
+#                     surfaceSphericalFeature['rotSymCentre'] = afs['ParsedSurface']['pointFeature']['rotSymFeature'][
+#                         'rotSymCentre']
+#                     surfaceSphericalFeature['rotSymRadius'] = afs['ParsedSurface']['pointFeature']['rotSymFeature'][
+#                         'rotSymRadius']
+#
+#     return surfaceFeature, surfaceSphericalFeature
+
+
+def translateShapeMatchFormat(surfacePointFeature, surfaceSphericalFeature, rotSymFeatures):
     # translate to shapeMatch friendly categories
     # based on data structure within STEPaffine, viz
     #         self.featureMaxPoints = []
@@ -6316,69 +7609,393 @@ def translateShapeMatchFormat():
 
     return shapeMatchFormat
 
+#
+# #================================================================ original script structure follows
+#
+# # testDir = os.path.normpath(r"/media/foobert/Dell2HDD/STEP_test_files")
+# # #primitivesDir = os.path.normpath(testDir + r"primitives")
+# #
+# # #filepath = "primitives/Cube/unit_cube_inc8.0_blend.06.stp"
+# # # filepath = "primitives/Cube/Cylinder/unit_cyl.stp"
+# # # filepath = "primitives/Cube/Primitive_Cone-PartCone.step"
+# #
+# # #filepath = testDir + "RR_STEP_test_1A.step" # pass.. I think, no representation available
+# # #filepath = testDir + "RR_STEP_test_N.step" # fail, no trimmed_curve circle code================
+# # # filepath = testDir + "00000001_1ffb81a71e5b402e966b9341_step_000.step"
+# # # filepath = testDir + "00000010_b4b99d35e04b4277931f9a9c_step_000.step"
+# # #filepath = "LEA-M8F(AP203).STEP" # too large to debug?
+# #
+# # #filepath = testDir + "9341_step_000.step" #FAIL - reverse list from spline=======================
+# # #filepath = testDir + "revolve_spline.step" #PASS
+# #
+# # # filepath = testDir + "/simpleSpindle1.step" #PASS
+# # testDir + "Maltese_cruciform.step" #PASS
+# # #filepath = "TiltedConeAP203.step" # pass
+# # #filepath = "OffsetCone_AP214_noPlacement_noParametric.step"
+# # #filepath = "OffsetCone-PartCone.step" #PASS2
+# # #filepath = "TiltedCylinder4_AP214_PC.step" #PASS2
+# # #filepath = "TiltedCylinder5-AP214_draft.step" #PASS2
+# # #filepath = "TiltedCylinder4c-AP203-ESOP.step" #PASS2
+# # #filepath = "Cylinder5_AP214_PC.step" #PASS2
+# # #filepath = "DrexelBlendedCylinder_topOvalPlane.step" #PASS2
+# # #filepath = "DrexelBlendedCylinder_curvedBlend.step" #PASS2
+# # #filepath = "DrexelBlendedCylinder_midriffTube.step" #PASS2 - note disparity between ellipse minima and vertexes
+# #
+# # # can a minima exist on an NURB surface edge? test all local NURB boundary minima against centroid disp??
+# #
+# # #filepath = "TiltedCylinder2.step" #PASS2
+# # #filepath = "TiltedCylinder3.step" #PASS2
+# # #filepath = "primitives/Cube/unit_cube.stp" # pass2
+# # #filepath = "Drexel_blended_ellipse_plain.step" # fail, no surfaces ellipse
+# # filepath = "Drexel_blended_cylinder.step" # pass2
+# # #filepath = "DrexelBlendedCylinder_curvedBlend.step" # pass2
+# # #filepath = "TiltedCylinder.step" # pass2
+# # #filepath = "Synth_ellipse_plain.step" # pass (no Advanced Face Surface)
+# #
+#
+# testDir = os.path.normpath(r"/media/foobert/Dell2HDD/STEP_test_files")
+# # OFF format
+# filepath = "A.off"
+# #filepath = "bathtub_0001.off"
+# #filepath = "bed_0001.off"
+# #filepath = "testOFF.off"
+# #filepath = "octtorus.off"
+# #filepath = "Q.off" #pass
+# #filepath = "primitives/Cube/unit_cube.stp"
+#
+# try:
+#     # filepath check
+#     checkPath = glob.glob(testDir + os.sep + filepath)
+#     if len(checkPath) != 1:
+#         raise Exception("pathname failure")
+#     else:
+#         print("STEPaffineFeatures test: ", filepath)
+#         with open(testDir + os.sep + filepath) as f:
+#             fileData = f.read()
+# except:
+#     print("check media is mounted")
+#     raise Exception("file failure")
+#
+# if filepath.split(".",1)[1] in ["step", "stp"]:
+#     # FORMAT stepcode.Part21 objects INTO USEFUL LOCAL DATA STRUCTURES WHERE INTERRELATIONSHIPS ARE RECORDED
+#     STEPobj = parseSTEPstr(fileData) # scope?
+#     AdvancedFaceSurfaces = parseStepcodePart21object()
+#     # get all points of model for initial median centroid
+#     outermostPoints = getConvexHullPointSetSTEP()
+#     centroid = medianPoint(outermostPoints)
+#     # if not OFF?
+#     calculateEdgeMaxMin(AdvancedFaceSurfaces)
+#
+# elif filepath.split(".",1)[1] in ["OFF", "off"]:
+#     v1series = []
+#     v2series = []
+#     edgeSeries = []
+#     OFF_points, OFF_faces = getOFFpointsfaces(fileData)
+#     AdvancedFaceSurfaces = parseOFFpointsfaces_1(OFF_points, OFF_faces)
+#     # OFF convex hull points is simply points set
+#     outermostPoints = [np.array(c) for c in OFF_points]
+#     centroid = medianPoint(outermostPoints)
+#
+# else:
+#     print(" unknown file identifier")
+#     exit(-1)
+#
+# centroid = medianPoint(outermostPoints)
+# # continue to ignore local maxima at both radial extents and NURB surface maxima?
+#
+# # iteratively calculate max/min points and median centroid point
+# # extract max values for all surfaces to add to median vertex calculation for centroid
+# centroid = centroidIterate(AdvancedFaceSurfaces, centroid, verbose=True)
+#
+# # expensive surface minima calculations after centroid is settled
+# for afs in AdvancedFaceSurfaces:
+#     surfaceParse(afs, centroid, calcExtrema=True)
+#
+# # todo: search for all edges & surfaces related to point features (maybe symmetrical arcs too) get nearest points
+# # to originating points (???)
+# # note that one can expect C2 continuity in STEP format, meaning that two point maxima will not be adjacent except
+# # where the surface or edge is of a fixed radius from the local centroid.
+#
+# # for every local minima or maxima feature point, find the surrounding local minima points by way of geometrical features
+# # (i.e. opposing minima on a thin plate don't count; adjacency is not calculated by cartesian distance but surface topography)
+#
+# # create similar dict structure listing local minima/maxima tuple (index1, index2) key and index list of surrounding local maxima/minima
+# # ignore overall minima within a surface and edge boundaries
+#
+# # surface maxima/minima may be associated with related edge maxima/minima (note B-spline surface may have several max/min)
+# # find the minima/maxima associated with every edge
+#
+#
+# # todo: looking for 'superTypeName', e.g TiltedCylinder.step, eventually delete
+# for afs in AdvancedFaceSurfaces:
+#     for edge in afs['outerBoundEdgeLoop']:
+#         if (edge.get('superTypeNameFlag') is not None):
+#             if edge['superTypeName'] == 'SEAM_CURVE':  # exclude SEAM_CURVE data
+#                 print("is this code reachable??")
+#
+# surfaceGlobalExtrema(AdvancedFaceSurfaces)
+# parseAdjacentFeatures(AdvancedFaceSurfaces)
+# rotSymFeatures = getRotSymFeatures(AdvancedFaceSurfaces)
+#
+# # import pickle
+# # with open('bed_0001.pkl', 'wb') as p_file:
+# #     pickle.dump([AdvancedFaceSurfaces, centroid, OFF_faces, OFF_points], p_file)
+# #
+# # with open('bed_0001.pkl', 'rb') as p_file:  # Python 3: open(..., 'rb')
+# #     AdvancedFaceSurfaces, centroid, OFF_faces, OFF_points = pickle.load(p_file)
+#
+#
+# surfacePointFeature, surfaceSphericalFeature = getPointFeatures(AdvancedFaceSurfaces)
+# shapeMatchFeatures = translateShapeMatchFormat()surfacePointFeature, surfaceSphericalFeature, rotSymFeatures)
+# shapeMatchFeatures['centroid'] = centroid
+#
+# # #     def __init__(self):
+# # #         self.objectHandle = (
+# # #             ""  # pointer or string used to reference model in CAD model-space
+# # #         )
+# # #         self.filepath = ""
+# # #         self.name = ""
+# # #         self.generationTime = 0
+# # #         self.surfaceStatus = ""
+# # #         self.insertionPoint = Point(0.0, 0.0, 0.0)
+# # #         self.rotation = 0.0
+# # #         self.rotationAxis = None
+# # #         self.rotationMatrix = None
+# # #         self.scale = 1.0
+# #
+# # #         self.featureMaxPoints = []
+# # #         self.featureMinPoints = []  # arrange as a list of lists representing points
+# #
+# # #         self.surfacePoints = []
+# #
+# # #         self.centroid = None
+# # #         self.rotSymRidgePoints = []
+# # #         self.rotSymGroovePoints = []
+# #
+# # #         self.featureMaxCurveDisps = []
+# # #         self.featureMaxCentres = []
+# #
+# # #         self.featureMinCurveDisps = []
+# # #         self.featureMinCentres = []
+# #
+# # #         self.featureSphereDisps = []
+# # #         self.spherePoints = []
+# #
+# # #         self.centrePoints = []
+# #
+# # # export to shapeMatch format
+# #
+# # pprint(shapeMatchFeatures)
+# #
+# #pass  # stop here for now
+#
+# pprint(shapeMatchFeatures)
+# _1=1
 
-# todo: looking for 'superTypeName', e.g TiltedCylinder.step, eventually delete
-for afs in AdvancedFaceSurfaces:
-    for edge in afs['outerBoundEdgeLoop']:
-        if (edge.get('superTypeNameFlag') is not None):
-            if edge['superTypeName'] == 'SEAM_CURVE':  # exclude SEAM_CURVE data
-                print("is this code reachable??")
+#================================================================ original script structure above
+
+#
+#     # "RR_STEP_test_1A.step" # pass.. I think, no representation available
+#     # "RR_STEP_test_N.step" # fail, no trimmed_curve circle code================
+#     # "00000001_1ffb81a71e5b402e966b9341_step_000.step"
+#     # testDir + "00000010_b4b99d35e04b4277931f9a9c_step_000.step"
+#     # "LEA-M8F(AP203).STEP" # too large to debug?
+#
+#     testDir + os.sep + filepath
 
 
-parseAdjacentFeatures(AdvancedFaceSurfaces)
+def STEPfileParse(filepath):
+    if not filepath.split(".", 1)[1] in ["step", "stp"]:
+        print("WARNING: check file format name")
 
-# Note that rotSymFeatures returns fields consistent with rotationally symmetrical objects along consistent axes.
-# Relative maxima/minima would be lost if rotational features divided between individual surface
-rotSymFeatures = getRotSymFeatures(AdvancedFaceSurfaces)
+    try:
+        checkPath = glob.glob(filepath)
+        if len(checkPath) != 1:
+            raise Exception("pathname failure")
+        else:
+            with open(filepath) as f:
+                fileData = f.read()
+    except:
+        print("check media is mounted")
+        raise Exception("file failure")
 
-surfacePointFeature, surfaceSphericalFeature = getPointFeatures(AdvancedFaceSurfaces)
+    # FORMAT stepcode.Part21 objects INTO USEFUL LOCAL DATA STRUCTURES WHERE INTERRELATIONSHIPS ARE RECORDED
+    STEPobj = parseSTEPstr(fileData)
+    AdvancedFaceSurfaces = parseStepcodePart21object(STEPobj)
+    # get all points of model for initial median centroid
+    outermostPoints = getConvexHullPointSetSTEP(STEPobj)
+    #centroid = medianPoint(outermostPoints)
+    # if not OFF?
+    calculateEdgeMaxMin(AdvancedFaceSurfaces)
 
-shapeMatchFeatures = translateShapeMatchFormat()
-shapeMatchFeatures['centroid'] = centroid
+    centroid = medianPoint(outermostPoints)
+    # continue to ignore local maxima at both radial extents and NURB surface maxima?
 
-#     def __init__(self):
-#         self.objectHandle = (
-#             ""  # pointer or string used to reference model in CAD model-space
-#         )
-#         self.filepath = ""
-#         self.name = ""
-#         self.generationTime = 0
-#         self.surfaceStatus = ""
-#         self.insertionPoint = Point(0.0, 0.0, 0.0)
-#         self.rotation = 0.0
-#         self.rotationAxis = None
-#         self.rotationMatrix = None
-#         self.scale = 1.0
+    # iteratively calculate max/min points and median centroid point
+    # extract max values for all surfaces to add to median vertex calculation for centroid
+    centroid = centroidIterate(AdvancedFaceSurfaces, centroid, verbose=True)
 
-#         self.featureMaxPoints = []
-#         self.featureMinPoints = []  # arrange as a list of lists representing points
+    # expensive surface minima calculations after centroid is settled
+    for afs in AdvancedFaceSurfaces:
+        surfaceParse(afs, centroid, calcExtrema=True)
 
-#         self.surfacePoints = []
+    # todo: search for all edges & surfaces related to point features (maybe symmetrical arcs too) get nearest points
+    # to originating points (???)
+    # note that one can expect C2 continuity in STEP format, meaning that two point maxima will not be adjacent except
+    # where the surface or edge is of a fixed radius from the local centroid.
 
-#         self.centroid = None
-#         self.rotSymRidgePoints = []
-#         self.rotSymGroovePoints = []
+    # for every local minima or maxima feature point, find the surrounding local minima points by way of geometrical features
+    # (i.e. opposing minima on a thin plate don't count; adjacency is not calculated by cartesian distance but surface topography)
 
-#         self.featureMaxCurveDisps = []
-#         self.featureMaxCentres = []
+    # create similar dict structure listing local minima/maxima tuple (index1, index2) key and index list of surrounding local maxima/minima
+    # ignore overall minima within a surface and edge boundaries
 
-#         self.featureMinCurveDisps = []
-#         self.featureMinCentres = []
+    # surface maxima/minima may be associated with related edge maxima/minima (note B-spline surface may have several max/min)
+    # find the minima/maxima associated with every edge
 
-#         self.featureSphereDisps = []
-#         self.spherePoints = []
+    # todo: looking for 'superTypeName', e.g TiltedCylinder.step, eventually delete
+    for afs in AdvancedFaceSurfaces:
+        for edge in afs['outerBoundEdgeLoop']:
+            if (edge.get('superTypeNameFlag') is not None):
+                if edge['superTypeName'] == 'SEAM_CURVE':  # exclude SEAM_CURVE data
+                    print("is this code reachable??")
 
-#         self.centrePoints = []
+    surfaceGlobalExtrema(AdvancedFaceSurfaces)
+    parseAdjacentFeatures(AdvancedFaceSurfaces)
+    rotSymFeatures = getRotSymFeatures(AdvancedFaceSurfaces)
+    surfacePointFeature, surfaceSphericalFeature = getPointFeatures(AdvancedFaceSurfaces)
+    shapeMatchFeatures = translateShapeMatchFormat(surfacePointFeature, surfaceSphericalFeature, rotSymFeatures)
+    shapeMatchFeatures['centroid'] = centroid
 
-# export to shapeMatch format
+    return(shapeMatchFeatures)
 
 
+def OFFfileParse(filepath):
+    if not filepath.split(".", 1)[1] in ["OFF", "off"]:
+        print("WARNING: check file format name")
+    try:
+        checkPath = glob.glob(filepath)
+        if len(checkPath) != 1:
+            raise Exception("pathname failure")
+        else:
+            with open(filepath) as f:
+                fileData = f.read()
+    except:
+        print("check media is mounted")
+        raise Exception("file failure")
 
-pprint(shapeMatchFeatures)
+    OFF_points, OFF_faces = getOFFpointsfaces(fileData)
+    AdvancedFaceSurfaces = parseOFFpointsfaces(OFF_points, OFF_faces)
+    # OFF convex hull points is simply points set
+    outermostPoints = [np.array(c) for c in OFF_points]
+    centroid = medianPoint(outermostPoints)
 
-#pass  # stop here for now
-_1=1
+    # iteratively calculate max/min points and median centroid point
+    # extract max values for all surfaces to add to median vertex calculation for centroid
+    # centroid = centroidIterate(AdvancedFaceSurfaces, centroid, verbose=True)
 
+    # expensive surface minima calculations after centroid is settled
+    for afs in AdvancedFaceSurfaces:
+        surfaceParse(afs, centroid, calcExtrema=True)
+        surfaceGlobalExtrema(afs)
+
+    parseAdjacentFeatures(AdvancedFaceSurfaces)
+    rotSymFeatures = getRotSymFeatures(AdvancedFaceSurfaces)
+    surfacePointFeature, surfaceSphericalFeature = getPointFeatures(AdvancedFaceSurfaces)
+    shapeMatchFeatures = translateShapeMatchFormat(surfacePointFeature, surfaceSphericalFeature, rotSymFeatures)
+    shapeMatchFeatures['centroid'] = centroid
+
+    return(shapeMatchFeatures)
+
+
+testDir = os.path.normpath(r"/media/foobert/Dell2HDD/STEP_test_files")
+# primitivesDir = os.path.normpath(testDir + r"primitives")
+
+STEPtestFileSet = [
+    "primitives/Cube/unit_cube.stp",
+    "primitives/Cube/unit_cube_inc8.0_blend.06.stp",
+    "primitives/Cube/Cylinder/unit_cyl.stp",
+    "primitives/Cube/Primitive_Cone-PartCone.step",
+    "9341_step_000.step",
+    "revolve_spline.step",
+    "simpleSpindle1.step",
+    "Maltese_cruciform.step",
+    "TiltedConeAP203.step",
+    "OffsetCone_AP214_noPlacement_noParametric.step",
+    "OffsetCone-PartCone.step",
+    "TiltedCylinder4_AP214_PC.step",
+    "TiltedCylinder5-AP214_draft.step",
+    "TiltedCylinder4c-AP203-ESOP.step",
+    "Cylinder5_AP214_PC.step",
+    "DrexelBlendedCylinder_topOvalPlane.step",
+    "DrexelBlendedCylinder_curvedBlend.step",
+    "DrexelBlendedCylinder_midriffTube.step",
+    "TiltedCylinder2.step",
+    "TiltedCylinder3.step",
+    "primitives/Cube/unit_cube.stp",
+    "Drexel_blended_ellipse_plain.step",
+    "Drexel_blended_cylinder.step",
+    "DrexelBlendedCylinder_curvedBlend.step",
+    "TiltedCylinder.step",
+    "Synth_ellipse_plain.step"
+]
+
+OFFtestFileSet = [
+    "A.off",
+    "testOFF.off",
+    "octtorus.off",
+    "Q.off",
+    "bed_0001.off",
+    "bathtub_0001.off"
+]
+
+def speedtest(function_wrapper):
+    import cProfile
+    import pstats
+    import snakeviz.cli as cli
+
+    with cProfile.Profile() as pr:
+        function_wrapper()
+    stats = pstats.Stats(pr)
+    stats.sort_stats(pstats.SortKey.TIME)
+    filename = "speedtest_profile.prof"
+    stats.dump_stats(filename=filename)
+    cli.main([filename])
+
+
+def profileWrapper():
+    import timeit
+    OFFtestFilePath = testDir + os.sep + "A.off" #"bed_0001.off"
+    print("STEPaffineFeatures OFF test: ", OFFtestFilePath)
+    startTime = timeit.default_timer()
+    shapeMatchFeatures = OFFfileParse(OFFtestFilePath)
+    print("Seconds execution time: ", timeit.default_timer() - startTime)
+    pprint(shapeMatchFeatures)
+
+def main():
+    speedtest(profileWrapper)
+
+if __name__ == "__main__":
+    main()
+
+exit(0)
+
+# run through a test suite
+for OFFtfs in OFFtestFileSet:
+    OFFtestFilePath = testDir + os.sep + OFFtfs
+    print("STEPaffineFeatures OFF test: ", OFFtestFilePath)
+    shapeMatchFeatures = OFFfileParse(OFFtestFilePath)
+    pprint(shapeMatchFeatures)
+
+
+# run through a test suite
+for STEPtfs in STEPtestFileSet:
+    STEPtestFilePath = testDir + os.sep + STEPtfs
+    print("STEPaffineFeatures STEP test: ", STEPtestFilePath)
+    shapeMatchFeatures = STEPfileParse(STEPtestFilePath)
+    pprint(shapeMatchFeatures)
+
+pass
 # The standard CSG primitives are the cone, eccentric_cone, cylinder, sphere, torus,
 # block, right_angular_wedge, ellipsoid, tetrahedron and pyramid.
 
